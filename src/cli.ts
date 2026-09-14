@@ -16,7 +16,8 @@
 import { parseArgs } from "node:util";
 import { link, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import { buildHtml, ReviewError } from "./build.ts";
+import { $ } from "bun";
+import { buildHtml, loadReview, ReviewError } from "./build.ts";
 import { serve, type Outcome } from "./serve.ts";
 
 const USAGE = `zreview — review a pull request one feature at a time
@@ -61,6 +62,18 @@ async function writeResult(path: string, outcome: Outcome): Promise<boolean> {
   return true;
 }
 
+/** --diff <file>, else `gh pr diff`, else no diff. A missing diff degrades the page; it must not block the review. */
+async function loadDiff(path: string | undefined, repo: string, number: number): Promise<string | undefined> {
+  if (path) {
+    const f = Bun.file(path);
+    if (!(await f.exists())) die(`--diff: not found: ${path}`);
+    return f.text();
+  }
+  if (!(await Bun.which("gh"))) { console.error("zreview: gh not on PATH, reviewing without the diff (pass --diff <file>)"); return undefined; }
+  const r = await $`gh pr diff ${number} --repo ${repo}`.quiet().nothrow();
+  if (r.exitCode !== 0) { console.error(`zreview: gh pr diff failed, reviewing without the diff: ${r.stderr.toString().trim()}`); return undefined; }
+  return r.stdout.toString();
+}
 const argv = Bun.argv.slice(2);
 if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") { console.log(USAGE); process.exit(0); }
 
@@ -78,6 +91,7 @@ const { values: opt, positionals } = parseArgs({
     "max-width": { type: "string", default: "1200" },
     quality: { type: "string", default: "82" },
     "no-reencode": { type: "boolean", default: false },
+    diff: { type: "string" },
   },
   allowPositionals: true,
 });
@@ -85,10 +99,12 @@ const src = positionals[0] ?? die(USAGE);
 if (opt["result-file"]) await checkResultPath(opt["result-file"]);
 
 try {
+  const pr = (await loadReview(src)).pr;
   const built = await buildHtml(src, {
     maxWidth: opt["no-reencode"] ? 0 : Number(opt["max-width"]),
     quality: Number(opt.quality),
     served: command === "review",
+    diffText: await loadDiff(opt.diff, pr.repo, pr.number),
   });
 
   if (command === "build") {

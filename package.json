@@ -1,6 +1,6 @@
 {
   "name": "zreview",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Review a pull request one feature at a time. Opens a local page, blocks until you decide, prints the decision.",
   "type": "module",
   "bin": { "zreview": "src/cli.ts" },

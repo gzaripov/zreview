@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+__STYLE__
+</style>
+</head>
+<body>
+<script id="review-data" type="application/json">__REVIEW_JSON__</script>
+<div class="layout">
+  <aside>
+    <h1 id="pr-title"></h1>
+    <div class="meta" id="pr-meta"></div>
+    <div class="exposure" id="pr-exposure"></div>
+    <nav id="nav"></nav>
+    <div class="unassigned" id="unassigned" hidden></div>
+    <div class="tally">
+      <div id="tally"></div>
+      <button id="submit" class="primary" hidden>Submit review</button>
+      <div id="submitted" class="done" hidden>Submitted. You can close this tab.</div>
+      <button id="copy">Copy review summary</button>
+      <button id="export">Export decisions.json</button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<button id="selbtn" class="selbtn" hidden>Comment</button>
+<script>
+const SERVED = __SERVED__;
+__APP__
+</script>
+</body>
+</html>

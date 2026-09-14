@@ -17,12 +17,17 @@ launch, block until the human decides, print the decision, exit with it.
 Bun only.
 
 ```bash
-git clone https://github.com/gzaripov/zreview && cd zreview && bun link
+zreview review review.json            # opens the page, blocks, prints the summary
+zreview review review.json --json     # one JSON record instead
+zreview build  review.json -o review.html   # static page, no server
 ```
 
-## Use
-
-```bash
+`review` fetches the PR's diff through `gh pr diff` and shows each feature's
+files inline; pass `--diff <file>` to supply it yourself, or run without `gh`
+and the page degrades to file links. Click any diff line to comment on it.
+Select text in the scenario, description, or tested blocks and a **Comment**
+button appears, the way Plannotator does it. Comments ride along in the record
+and in the summary.
 zreview review review.json            # opens the page, blocks, prints the summary
 zreview review review.json --json     # one JSON record instead
 zreview build  review.json -o review.html   # static page, no server
@@ -39,13 +44,22 @@ stdout is the whole interface.
 | Outcome | When | stdout |
 |---|---|---|
 | `approved` | every feature approved, then Submit | the Markdown summary |
-| `changes` | any feature sent back, then Submit | the Markdown summary |
-| `incomplete` | Submit with features still open | the Markdown summary |
-| `dismissed` | tab closed, or `--timeout` elapsed | nothing |
-
-With `--json`, one record:
+With `--json`, one record. Each feature carries its decision, note, and
+comments — `line` comments name a file, side and line; `text` comments carry the
+quoted passage and its section:
 
 ```json
+{ "decision": "changes",
+  "features": {
+    "f3": { "decision": "changes", "note": "", "at": 1789412507845,
+            "comments": [
+              { "kind": "line", "file": "apps/mobile-ios/Momo/Models/WordPackImport.swift", "side": "new", "line": 1,
+                "body": "Confirm unescaped slashes in the digest is deliberate." },
+              { "kind": "text", "section": "scenario", "quote": "same pack twice",
+                "body": "Byte-identical, or same UUID?" } ] } },
+  "summary": "## Review of gzaripov/momo#45 at `18b8bf5`\n\n1. …",
+  "url": "http://127.0.0.1:49763/" }
+```
 { "decision": "changes",
   "features": { "f4": { "decision": "changes", "note": "…", "at": 1789408171398 } },
   "summary": "## Review of gzaripov/momo#45 at `44c0bf9`\n\n1. …",
@@ -65,6 +79,7 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 ## Flags
 
 ```
+--diff <file>           unified diff to show; default is `gh pr diff <number>`
 --json                  one JSON record on stdout
 --require-approval      exit code carries the outcome
 --result-file <path>    also write the record here, atomically; refuses to overwrite

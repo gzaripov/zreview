@@ -13,18 +13,53 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export type Shots = { before?: string; after?: string; caption?: string; before_src?: string; after_src?: string };
+export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
+export type Hunk = { header: string; lines: DiffLine[] };
+export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
+export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string };
 export type Feature = {
   id: string; title: string; scenario: string; description: string;
   diagrams?: { title?: string; mermaid: string }[];
   screenshots?: Shots | null;
-  files?: (string | { path: string; url: string })[];
+  files?: (string | FileRef)[];
   tested?: string;
 };
 export type Review = {
   pr: { repo: string; number: number; url: string; title: string; base: string; head: string; exposure?: string };
   features: Feature[];
+  unassigned?: string[];
 };
-export type BuildOptions = { maxWidth: number; quality: number; served: boolean };
+export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string };
+
+/** Parse a unified diff (git / `gh pr diff`) into per-file hunks with old and new line numbers. */
+export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
+  const files = new Map<string, FileDiff>();
+  let file: FileDiff | null = null;
+  let hunk: Hunk | null = null;
+  let oldNo = 0, newNo = 0;
+  for (const raw of text.split("\n")) {
+    if (raw.startsWith("diff --git ")) {
+      const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(raw);
+      file = { path: m ? m[2] : raw.slice(11), hunks: [], add: 0, del: 0 };
+      files.set(file.path, file);
+      hunk = null;
+      continue;
+    }
+    if (!file) continue;
+    if (/^(new file|deleted file|rename to|Binary files)/.test(raw)) {
+      file.status = raw.startsWith("new") ? "added" : raw.startsWith("deleted") ? "deleted" : raw.startsWith("rename") ? "renamed" : "binary";
+      continue;
+    }
+    const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (at) { oldNo = +at[1]; newNo = +at[2]; hunk = { header: raw, lines: [] }; file.hunks.push(hunk); continue; }
+    if (!hunk || raw.startsWith("\\")) continue;
+    const t = raw[0], body = raw.slice(1);
+    if (t === "+") { hunk.lines.push({ t, new: newNo++, text: body }); file.add++; }
+    else if (t === "-") { hunk.lines.push({ t, old: oldNo++, text: body }); file.del++; }
+    else if (t === " " || raw === "") { hunk.lines.push({ t: " ", old: oldNo++, new: newNo++, text: body }); }
+  }
+  return files;
+}
 
 export class ReviewError extends Error {}
 
@@ -77,22 +112,34 @@ export async function loadReview(path: string): Promise<Review> {
   }
   return review;
 }
-
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
   const review = await loadReview(reviewPath);
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
+  const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;
+  const claimed = new Set<string>();
   for (const f of review.features ?? []) {
     f.files = (f.files ?? []).map((p) => (typeof p === "string" ? fileLink(review.pr, p) : p));
+    for (const ref of f.files as FileRef[]) {
+      claimed.add(ref.path);
+      const d = diffs?.get(ref.path);
+      if (d) Object.assign(ref, { hunks: d.hunks, add: d.add, del: d.del, status: d.status });
+    }
     const shots = f.screenshots;
     if (shots?.before) shots.before_src = await dataUri(shots.before, base, opts, log);
     if (shots?.after) shots.after_src = await dataUri(shots.after, base, opts, log);
   }
+  if (diffs) review.unassigned = [...diffs.keys()].filter((p) => !claimed.has(p)).sort();
   const payload = JSON.stringify(review).replaceAll("</", "<\\/");
-  const template = await Bun.file(join(import.meta.dir, "template.html")).text();
-  const html = template
+  const page = join(import.meta.dir, "page");
+  const [index, style, app] = await Promise.all(
+    ["index.html", "style.css", "app.js"].map((name) => Bun.file(join(page, name)).text()),
+  );
+  const html = index
     .replace("__TITLE__", `Review: ${review.pr.repo}#${review.pr.number}`)
+    .replace("__STYLE__", () => style)
     .replace("__SERVED__", String(opts.served))
-    .replace("__REVIEW_JSON__", () => payload);
+    .replace("__REVIEW_JSON__", () => payload)
+    .replace("__APP__", () => app);
   return { html, review, log };
 }
