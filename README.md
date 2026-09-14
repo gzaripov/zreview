@@ -102,10 +102,26 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
       "screenshots": { "before": "before.png", "after": "after.png", "caption": "…" },
       "files": ["packages/word-pack/src/schema.ts"],
       "tested": "Markdown. Command, observed result, what is not covered." }
-  ]
-}
-```
+- `screenshots` is `null` when the feature has no user-visible surface; the page
+  says so rather than leaving a blank. Paths are relative to `review.json`.
+- `entities` lists the domain types a feature adds, changes, renames, or
+  removes, and what you can do with each — one `operations` entry per method
+  or field worth knowing, with its signature. `renamed` entities carry `from`.
+  A grep can list every struct in a diff; it cannot tell `WordPack` from
+  `CodingKeys`, so this is authored judgment, not extraction:
 
+  ```json
+  "entities": [
+    { "name": "WordPackImporter", "kind": "service", "change": "added",
+      "file": "apps/mobile-ios/Momo/Repositories/WordPackImporter.swift",
+      "summary": "Turns validated bytes into a word list, a lesson, and a receipt in one transaction.",
+      "operations": [
+        { "name": "importWordPack", "change": "added",
+          "signature": "func importWordPack(_ data: Data, origin: WordPackOrigin, now: Date) async throws -> WordPackImportResult",
+          "note": "A replay with the same digest returns the stored receipt and writes nothing." } ] },
+    { "name": "CustomLesson", "kind": "model", "change": "renamed", "from": "SpinOff",
+      "summary": "The Swift name changes; the table and wire kind stay, so nothing migrates for the rename." } ]
+  ```
 - `screenshots` is `null` when the feature has no user-visible surface; the page
   says so rather than leaving a blank. Paths are relative to `review.json`.
 - `files` are hashed into `#diff-<sha256>` links into the PR's Files tab. A

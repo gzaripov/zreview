@@ -53,6 +53,17 @@
     return `<div class="shots">${fig('Before', s.before_src)}${fig('After', s.after_src)}</div>` + (s.caption ? `<figcaption>${esc(s.caption)}</figcaption>` : '');
   }
 
+  function entities(f) {
+    const es = f.entities || [];
+    if (!es.length) return `<p class="none">No domain entity added or changed.</p>`;
+    const op = (o) => `<li class="op ${o.change || 'changed'}"><code>${esc(o.signature || o.name)}</code>${o.change ? `<span class="chip ${o.change}">${o.change}</span>` : ''}${o.note ? `<div class="opnote">${esc(o.note)}</div>` : ''}</li>`;
+    return es.map(e => `<div class="entity ${e.change}">
+      <div class="eh"><span class="chip ${e.change}">${e.change}</span><span class="ename">${esc(e.name)}</span>${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}${e.file ? `<span class="efile">${esc(e.file)}</span>` : ''}</div>
+      <div class="esum">${esc(e.summary)}</div>
+      ${(e.operations || []).length ? `<ul class="ops">${e.operations.map(op).join('')}</ul>` : ''}
+    </div>`).join('');
+  }
+
   function fileBlock(f, file) {
     const open = expanded[f.id]?.has(file.path);
     const stat = file.hunks ? `<span class="stat"><span class="a">+${file.add}</span> <span class="d">−${file.del}</span></span>` : '';
@@ -100,6 +111,7 @@
       <h2>${esc(f.title)}</h2>
       <div class="section"><h3>User scenario</h3><div class="scenario commentable" data-section="scenario">${esc(f.scenario || '')}</div></div>
       <div class="section"><h3>What changed</h3><div class="prose commentable" data-section="description">${md(f.description)}</div></div>
+      <div class="section"><h3>Entities</h3>${entities(f)}</div>
       <div class="section"><h3>Architecture</h3>${diagrams}</div>
       <div class="section"><h3>Before / after</h3>${shots(f.screenshots)}</div>
       <div class="section"><h3>Diff</h3>${files || '<p class="none">No files listed.</p>'}</div>

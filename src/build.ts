@@ -17,8 +17,14 @@ export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: s
 export type Hunk = { header: string; lines: DiffLine[] };
 export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
 export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string };
+export type Operation = { name: string; signature?: string; change?: "added" | "changed" | "removed"; note?: string };
+export type Entity = {
+  name: string; kind?: string; change: "added" | "changed" | "renamed" | "removed";
+  from?: string; summary: string; file?: string; operations?: Operation[];
+};
 export type Feature = {
   id: string; title: string; scenario: string; description: string;
+  entities?: Entity[];
   diagrams?: { title?: string; mermaid: string }[];
   screenshots?: Shots | null;
   files?: (string | FileRef)[];

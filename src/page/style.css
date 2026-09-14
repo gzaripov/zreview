@@ -72,6 +72,26 @@ figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .file > .fh a { font-size: 12px; }
 .file > .fh .tri { color: var(--muted); width: 1em; }
 .hunk { border-top: 1px solid var(--line); }
+
+/* Entities */
+.entity { border: 1px solid var(--line); border-left-width: 3px; border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; }
+.entity.added { border-left-color: var(--ok); } .entity.changed { border-left-color: var(--warn); }
+.entity.renamed { border-left-color: var(--accent); } .entity.removed { border-left-color: var(--bad); }
+.eh { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.ename { font-family: ui-monospace, Menlo, monospace; font-size: 15px; font-weight: 600; }
+.ekind, .efrom, .efile { font-size: 12px; color: var(--muted); }
+.efile { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.esum { margin-top: 6px; }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); flex: none; }
+.chip.added { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
+.chip.changed { color: var(--warn); border-color: var(--warn); }
+.chip.renamed { color: var(--accent); border-color: var(--accent); }
+.chip.removed { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
+ul.ops { list-style: none; padding: 0; margin: 10px 0 0; }
+ul.ops li.op { padding: 5px 0; border-top: 1px solid var(--line); display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+ul.ops li.op code { background: none; padding: 0; }
+ul.ops li.op.removed code { text-decoration: line-through; color: var(--muted); }
+.opnote { flex-basis: 100%; font-size: 13px; color: var(--muted); }
 .hh { padding: 4px 12px; font-size: 12px; color: var(--muted); background: var(--panel); font-family: ui-monospace, Menlo, monospace; }
 .dl { display: grid; grid-template-columns: 3.2em 3.2em 1fr; line-height: 1.5; cursor: pointer; }
 .dl:hover .code { outline: 1px solid var(--accent); outline-offset: -1px; }
