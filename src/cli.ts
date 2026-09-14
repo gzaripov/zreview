@@ -14,7 +14,7 @@
 // unwritable result file.
 
 import { parseArgs } from "node:util";
-import { rename, stat } from "node:fs/promises";
+import { link, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { buildHtml, ReviewError } from "./build.ts";
 import { serve, type Outcome } from "./serve.ts";
@@ -45,10 +45,20 @@ async function checkResultPath(path: string) {
   if (!(await stat(dir).catch(() => null))?.isDirectory()) die(`--result-file: directory does not exist: ${dir}`);
 }
 
-async function writeResult(path: string, outcome: Outcome) {
+/** Atomic and no-clobber. The record is written fully to a temp file, then hard-linked into place; link() refuses an existing path. */
+async function writeResult(path: string, outcome: Outcome): Promise<boolean> {
   const tmp = `${path}.${process.pid}.tmp`;
   await Bun.write(tmp, JSON.stringify(outcome, null, 2));
-  await rename(tmp, path);
+  try {
+    await link(tmp, path);
+  } catch (e) {
+    await unlink(tmp).catch(() => {});
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    console.error(`--result-file ${path} appeared during the review; not overwriting. The record is on stdout.`);
+    return false;
+  }
+  await unlink(tmp);
+  return true;
 }
 
 const argv = Bun.argv.slice(2);
@@ -96,11 +106,12 @@ try {
     timeoutSeconds: opt.timeout ? Number(opt.timeout) : undefined,
   });
 
-  if (opt["result-file"]) await writeResult(opt["result-file"], outcome);
   if (opt.json) console.log(JSON.stringify(outcome));
   else if (outcome.decision === "dismissed") console.error("zreview: dismissed without a decision");
   else console.log(outcome.summary);
 
+  const written = opt["result-file"] ? await writeResult(opt["result-file"], outcome) : true;
+  if (!written) process.exit(2);
   process.exit(opt["require-approval"] && outcome.decision !== "approved" ? 1 : 0);
 } catch (e) {
   if (e instanceof ReviewError) die(e.message);
