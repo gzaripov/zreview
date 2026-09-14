@@ -1,0 +1,17 @@
+{
+  "name": "zreview",
+  "version": "0.1.0",
+  "description": "Review a pull request one feature at a time. Opens a local page, blocks until you decide, prints the decision.",
+  "type": "module",
+  "bin": { "zreview": "src/cli.ts" },
+  "files": ["src", "README.md"],
+  "scripts": {
+    "review": "bun run src/cli.ts review",
+    "build": "bun run src/cli.ts build"
+  },
+  "engines": { "bun": ">=1.2" },
+  "license": "MIT",
+  "author": "Gleb Zaripov <https://zaripov.dev>",
+  "repository": "github:gzaripov/zreview",
+  "keywords": ["pull-request", "code-review", "review", "cli", "bun"]
+}
