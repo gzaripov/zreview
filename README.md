@@ -22,20 +22,16 @@ zreview review review.json --json     # one JSON record instead
 zreview build  review.json -o review.html   # static page, no server
 ```
 
-`review` fetches the PR's diff through `gh pr diff` and shows each feature's
-files inline; pass `--diff <file>` to supply it yourself, or run without `gh`
-and the page degrades to file links. Click any diff line to comment on it.
-Select text in the scenario, description, or tested blocks and a **Comment**
-button appears, the way Plannotator does it. Comments ride along in the record
-and in the summary.
-zreview review review.json            # opens the page, blocks, prints the summary
-zreview review review.json --json     # one JSON record instead
-zreview build  review.json -o review.html   # static page, no server
-```
-
 `review` serves the page on a random localhost port, opens your browser, and
 blocks. Click **Submit review** and the process returns. Close the tab and it
 returns `dismissed`.
+
+It fetches the PR's diff through `gh pr diff` and shows each feature's files
+inline; pass `--diff <file>` to supply it yourself, or run without `gh` and the
+page degrades to file links. Click any diff line to comment on it. Select text
+in the scenario, description, or tested blocks and a **Comment** button
+appears, the way Plannotator does it. Comments ride along in the record and in
+the summary.
 
 ## The contract
 
@@ -44,6 +40,10 @@ stdout is the whole interface.
 | Outcome | When | stdout |
 |---|---|---|
 | `approved` | every feature approved, then Submit | the Markdown summary |
+| `changes` | any feature sent back, then Submit | the Markdown summary |
+| `incomplete` | Submit with features still open | the Markdown summary |
+| `dismissed` | tab closed, or `--timeout` elapsed | nothing |
+
 With `--json`, one record. Each feature carries its decision, note, and
 comments — `line` comments name a file, side and line; `text` comments carry the
 quoted passage and its section:
@@ -58,12 +58,7 @@ quoted passage and its section:
               { "kind": "text", "section": "scenario", "quote": "same pack twice",
                 "body": "Byte-identical, or same UUID?" } ] } },
   "summary": "## Review of gzaripov/momo#45 at `18b8bf5`\n\n1. …",
-  "url": "http://127.0.0.1:49763/" }
-```
-{ "decision": "changes",
-  "features": { "f4": { "decision": "changes", "note": "…", "at": 1789408171398 } },
-  "summary": "## Review of gzaripov/momo#45 at `44c0bf9`\n\n1. …",
-  "url": "http://127.0.0.1:49763/" }
+  "url": "http://127.0.0.1:65392/" }
 ```
 
 Exit code is `0` unless you ask for it to mean something:
