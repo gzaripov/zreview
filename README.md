@@ -3,35 +3,83 @@
 Review a pull request one feature at a time.
 
 A PR is rarely one change. `zreview` takes a `review.json` that splits it into
-features — each with the user scenario, what changed, architecture diagrams,
-before/after screenshots when the UI moved, and how it was tested — and opens
-a local page with a sidebar. You walk the features, approve or request changes
-on each, and submit. The decision comes back on stdout, so an agent or a script
-can wait on it.
+features — each with the user scenario, what changed, the domain entities and
+what you can do with them, architecture diagrams, before/after screenshots
+when the UI moved, the diff, and how it was tested — and opens a local page
+with a sidebar. You walk the features, approve or request changes on each,
+comment on diff lines or on any passage of text, and submit. The decision
+comes back on stdout, so an agent or a script can wait on it.
 
 Built for agents to drive, in the shape of [Plannotator](https://github.com/backnotprop/plannotator):
 launch, block until the human decides, print the decision, exit with it.
 
 ## Install
 
-Bun only.
+Requires [Bun](https://bun.sh). `gh` is optional but recommended — it fetches
+the diff and the PR metadata.
 
 ```bash
-zreview review review.json            # opens the page, blocks, prints the summary
-zreview review review.json --json     # one JSON record instead
-zreview build  review.json -o review.html   # static page, no server
+curl -fsSL https://raw.githubusercontent.com/gzaripov/zreview/main/install.sh | bash
+```
+
+That clones to `~/code/zreview`, puts `zreview` on PATH with `bun link`, and
+installs the agent skill where both Claude Code and omp load it. Re-run it to
+update. From a checkout, `./install.sh` does the same.
+
+Manually:
+
+```bash
+git clone https://github.com/gzaripov/zreview ~/code/zreview
+cd ~/code/zreview && bun link
+ln -sfn ~/code/zreview/skill ~/.agents/skills/zreview
+ln -sfn ~/.agents/skills/zreview ~/.claude/skills/zreview
+```
+
+Check: `zreview --help`, and in either agent, ask it to "review PR 45 with
+zreview" — the skill should load.
+
+## Use
+
+### From an agent
+
+Ask Claude Code or omp to review a PR. The `zreview` skill tells it how: pin
+the head, split the diff into features, write `review.json`, run `zreview
+review`, wait, act on what comes back. The agent does the analysis; zreview
+renders it and collects your decision.
+
+### By hand
+
+Write `review.json` (schema below), then:
+
+```bash
+zreview review review.json                   # opens the page, blocks, prints the summary
+zreview review review.json --json            # one JSON record instead
+zreview build  review.json -o review.html    # static page, no server, nothing to wait for
 ```
 
 `review` serves the page on a random localhost port, opens your browser, and
-blocks. Click **Submit review** and the process returns. Close the tab and it
-returns `dismissed`.
+blocks. It fetches the PR's diff through `gh pr diff` and shows each feature's
+files inline; pass `--diff <file>` to supply one yourself, or run without `gh`
+and the page degrades to file links.
 
-It fetches the PR's diff through `gh pr diff` and shows each feature's files
-inline; pass `--diff <file>` to supply it yourself, or run without `gh` and the
-page degrades to file links. Click any diff line to comment on it. Select text
-in the scenario, description, or tested blocks and a **Comment** button
-appears, the way Plannotator does it. Comments ride along in the record and in
-the summary.
+### In the page
+
+- **Sidebar** lists the features. The badge is the decision; a `✎` count is
+  how many comments you left.
+- **Each feature** shows the user scenario, what changed, the entities it
+  adds or changes (what each consists of, what you can do with it, why, and a
+  serialized example under a cut), architecture diagrams, before/after
+  screenshots, the diff, and how it was tested.
+- **Comment on a diff line** — click it. **Comment on text** — select any
+  passage in the scenario, description, or tested block and a Comment button
+  appears; the quote stays highlighted with your comment as its tooltip.
+- **Approve** or **Request changes** per feature, with a note.
+- **Submit review** returns the decision to the process. Close the tab
+  instead and it returns `dismissed`. **Copy review summary** and **Export
+  decisions.json** work with or without a server.
+
+Decisions persist in the browser, keyed on `repo#number@head`, so reopening
+the same head shows them again and a review of a stale head is visibly stale.
 
 ## The contract
 
@@ -45,19 +93,19 @@ stdout is the whole interface.
 | `dismissed` | tab closed, or `--timeout` elapsed | nothing |
 
 With `--json`, one record. Each feature carries its decision, note, and
-comments — `line` comments name a file, side and line; `text` comments carry the
-quoted passage and its section:
+comments — `line` comments name a file, side and line; `text` comments carry
+the quoted passage and its section:
 
 ```json
 { "decision": "changes",
   "features": {
-    "f3": { "decision": "changes", "note": "", "at": 1789412507845,
-            "comments": [
-              { "kind": "line", "file": "apps/mobile-ios/Momo/Models/WordPackImport.swift", "side": "new", "line": 1,
-                "body": "Confirm unescaped slashes in the digest is deliberate." },
-              { "kind": "text", "section": "scenario", "quote": "same pack twice",
-                "body": "Byte-identical, or same UUID?" } ] } },
-  "summary": "## Review of gzaripov/momo#45 at `18b8bf5`\n\n1. …",
+    "import": { "decision": "changes", "note": "", "at": 1789412507845,
+                "comments": [
+                  { "kind": "line", "file": "src/importer.ts", "side": "new", "line": 41,
+                    "body": "Confirm unescaped slashes in the digest is deliberate." },
+                  { "kind": "text", "section": "scenario", "quote": "same pack twice",
+                    "body": "Byte-identical, or same UUID?" } ] } },
+  "summary": "## Review of owner/name#45 at `18b8bf5`\n\n1. …",
   "url": "http://127.0.0.1:65392/" }
 ```
 
@@ -74,14 +122,14 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 ## Flags
 
 ```
---diff <file>           unified diff to show; default is `gh pr diff <number>`
 --json                  one JSON record on stdout
 --require-approval      exit code carries the outcome
 --result-file <path>    also write the record here, atomically; refuses to overwrite
+--diff <file>           unified diff to show; default is `gh pr diff <number>`
 --no-open               do not launch a browser (prints the URL on stderr)
 --port <n>              fixed port instead of random
 --timeout <seconds>     give up as dismissed
---max-width <px>        screenshot cap, default 1200 (see below)
+--max-width <px>        screenshot width cap, default 1200
 --quality <n>           JPEG quality, default 82
 --no-reencode           inline screenshots as captured
 ```
@@ -91,13 +139,14 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 ```json
 {
   "pr": { "repo": "owner/name", "number": 45, "url": "https://github.com/owner/name/pull/45",
-          "title": "…", "base": "main", "head": "44c0bf9",
+          "title": "…", "base": "main", "head": "18b8bf5",
           "exposure": "Dark. No user path reaches this yet." },
   "features": [
     { "id": "contract",
       "title": "Portable word-pack contract",
       "scenario": "A producer outside the app writes a word pack; a learner imports it.",
       "description": "Markdown. What changed and why.",
+      "entities": [ … ],
       "diagrams": [ { "title": "Contract boundary", "mermaid": "flowchart LR\n  A --> B" } ],
       "screenshots": { "before": "before.png", "after": "after.png", "caption": "…" },
       "files": ["packages/word-pack/src/schema.ts"],
@@ -106,15 +155,17 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 }
 ```
 
-- `screenshots` is `null` when the feature has no user-visible surface; the page
-  says so rather than leaving a blank. Paths are relative to `review.json`.
-- `entities` lists the domain types a feature adds, changes, renames, or
+- `pr.head` is the commit the analysis describes. The page shows it and keys
+  the decision state on it.
+- `scenario` is the user's situation before any mechanism. If none exists, say
+  the feature is infrastructure rather than inventing a user.
+- `entities` are the domain types a feature adds, changes, renames, or
   removes. Each has `fields` (what it consists of) and `operations` (what you
   can do with it); every part carries a `meaning` and, where it matters, a
-  `why` — the reasoning is the point, the type alone is not. `renamed` entities
-  carry `from`. An `example` is a serialized instance, pretty-printed under a
-  collapsed *Example*. A grep can list every struct in a diff; it cannot tell
-  `WordPack` from `CodingKeys`, so this is authored judgment, not extraction:
+  `why`. `renamed` entities carry `from`. An `example` is a serialized
+  instance, shown under a collapsed *Example*. A grep can list every struct in
+  a diff; it cannot tell a domain entity from `CodingKeys`, so this is
+  authored judgment:
 
   ```json
   "entities": [
@@ -127,13 +178,14 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
       "operations": [
         { "name": "decodeWordPack", "type": "(bytes: Uint8Array) → WordPack",
           "meaning": "Enforces the 65,536-byte ceiling first, then parses." } ],
-      "example": { "momo": 1, "kind": "spinoff", "id": "…", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ] } } ]
+      "example": { "momo": 1, "kind": "spinoff", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ] } } ]
   ```
 
-- `files` are hashed into `#diff-<sha256>` links into the PR's Files tab. A
-  path not in the PR is a dead link.
-- Decisions persist in the browser, keyed on `repo#number@head`, so a review of
-  a stale head is visibly stale.
+- `screenshots` is `null` when the feature has no user-visible surface; the
+  page says so rather than leaving a blank. Paths are relative to `review.json`.
+- `files` are hashed into `#diff-<sha256>` links into the PR's Files tab and
+  matched against the diff for inline hunks. A path not in the PR is a dead
+  link, and the sidebar lists changed files no feature claimed.
 
 ## Screenshots
 
@@ -143,11 +195,16 @@ repositories need no attachment step. Each shot is re-encoded through `sips`
 width: phones top out near 1290 px, so at 1200 every phone capture keeps its
 native width and only tablet and desktop captures shrink. The re-encode is kept
 only when it is smaller than the original — flat UI usually compresses better
-as PNG. Nothing is ever upscaled. A real iPhone screen inlines at roughly
-100 KB.
+as PNG. Nothing is ever upscaled. A real phone screen inlines at roughly 100 KB.
 
-## Static pages
+## Layout
 
-`build` writes the same page without a server. Submit is hidden; **Copy review
-summary** and **Export decisions.json** remain, so a reviewer without the CLI
-can still hand back a verdict.
+```
+src/cli.ts        the contract: flags, stdout, exit codes
+src/serve.ts      localhost server; resolves on Submit or tab close
+src/build.ts      review.json → HTML; diff parsing; screenshot inlining
+src/page/         index.html, style.css, app.js — inlined into one file at build
+skill/SKILL.md    the agent skill; install.sh links it into ~/.claude/skills
+```
+
+Bun only, no dependencies. MIT.
