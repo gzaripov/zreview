@@ -109,23 +109,27 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 - `screenshots` is `null` when the feature has no user-visible surface; the page
   says so rather than leaving a blank. Paths are relative to `review.json`.
 - `entities` lists the domain types a feature adds, changes, renames, or
-  removes, and what you can do with each — one `operations` entry per method
-  or field worth knowing, with its signature. `renamed` entities carry `from`.
-  A grep can list every struct in a diff; it cannot tell `WordPack` from
-  `CodingKeys`, so this is authored judgment, not extraction:
+  removes. Each has `fields` (what it consists of) and `operations` (what you
+  can do with it); every part carries a `meaning` and, where it matters, a
+  `why` — the reasoning is the point, the type alone is not. `renamed` entities
+  carry `from`. An `example` is a serialized instance, pretty-printed under a
+  collapsed *Example*. A grep can list every struct in a diff; it cannot tell
+  `WordPack` from `CodingKeys`, so this is authored judgment, not extraction:
 
   ```json
   "entities": [
-    { "name": "WordPackImporter", "kind": "service", "change": "added",
-      "file": "apps/mobile-ios/Momo/Repositories/WordPackImporter.swift",
-      "summary": "Turns validated bytes into a word list, a lesson, and a receipt in one transaction.",
+    { "name": "WordPack", "kind": "value type", "change": "added", "from": "ContentDocument",
+      "summary": "The portable envelope a producer writes and a learner imports.",
+      "why": "Read and an import must produce the same object, so the engine never learns where a lesson came from.",
+      "fields": [
+        { "name": "kind", "type": "Kind", "meaning": "A word list, or a custom lesson that adds theory on top.",
+          "why": "Wire value for a custom lesson is still \"spinoff\", so packs already shipped keep decoding." } ],
       "operations": [
-        { "name": "importWordPack", "change": "added",
-          "signature": "func importWordPack(_ data: Data, origin: WordPackOrigin, now: Date) async throws -> WordPackImportResult",
-          "note": "A replay with the same digest returns the stored receipt and writes nothing." } ] },
-    { "name": "CustomLesson", "kind": "model", "change": "renamed", "from": "SpinOff",
-      "summary": "The Swift name changes; the table and wire kind stay, so nothing migrates for the rename." } ]
+        { "name": "decodeWordPack", "type": "(bytes: Uint8Array) → WordPack",
+          "meaning": "Enforces the 65,536-byte ceiling first, then parses." } ],
+      "example": { "momo": 1, "kind": "spinoff", "id": "…", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ] } } ]
   ```
+
 - `files` are hashed into `#diff-<sha256>` links into the PR's Files tab. A
   path not in the PR is a dead link.
 - Decisions persist in the browser, keyed on `repo#number@head`, so a review of

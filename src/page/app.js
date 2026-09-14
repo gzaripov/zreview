@@ -56,11 +56,16 @@
   function entities(f) {
     const es = f.entities || [];
     if (!es.length) return `<p class="none">No domain entity added or changed.</p>`;
-    const op = (o) => `<li class="op ${o.change || 'changed'}"><code>${esc(o.signature || o.name)}</code>${o.change ? `<span class="chip ${o.change}">${o.change}</span>` : ''}${o.note ? `<div class="opnote">${esc(o.note)}</div>` : ''}</li>`;
+    const chip = (c, own) => c && c !== own ? `<span class="chip ${c}">${c}</span>` : '';
+    const parts = (label, ps, own) => ps?.length ? `<div class="parts"><div class="plabel">${label}</div>
+      ${ps.map(p => `<div class="part ${p.change || ''}"><div class="pname"><code>${esc(p.name)}</code>${p.type ? `<span class="ptype">${esc(p.type)}</span>` : ''}${chip(p.change, own)}</div>
+        <div class="pmeaning">${esc(p.meaning)}${p.why ? `<div class="pwhy">${esc(p.why)}</div>` : ''}</div></div>`).join('')}</div>` : '';
+    const example = (e) => e.example === undefined ? '' :
+      `<details class="example"><summary>Example</summary><pre class="ex"><code>${esc(typeof e.example === 'string' ? e.example : JSON.stringify(e.example, null, 2))}</code></pre></details>`;
     return es.map(e => `<div class="entity ${e.change}">
       <div class="eh"><span class="chip ${e.change}">${e.change}</span><span class="ename">${esc(e.name)}</span>${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}${e.file ? `<span class="efile">${esc(e.file)}</span>` : ''}</div>
-      <div class="esum">${esc(e.summary)}</div>
-      ${(e.operations || []).length ? `<ul class="ops">${e.operations.map(op).join('')}</ul>` : ''}
+      <div class="esum">${esc(e.summary)}${e.why ? `<div class="ewhy">${esc(e.why)}</div>` : ''}</div>
+      ${parts('Consists of', e.fields, e.change)}${parts('What you can do', e.operations, e.change)}${example(e)}
     </div>`).join('');
   }
 

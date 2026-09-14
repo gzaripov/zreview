@@ -17,10 +17,14 @@ export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: s
 export type Hunk = { header: string; lines: DiffLine[] };
 export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
 export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string };
-export type Operation = { name: string; signature?: string; change?: "added" | "changed" | "removed"; note?: string };
+/** A field is what an entity consists of; an operation is what you can do with it. Both carry the reasoning, not just the type. */
+export type Part = { name: string; type?: string; meaning: string; why?: string; change?: "added" | "changed" | "removed" };
 export type Entity = {
   name: string; kind?: string; change: "added" | "changed" | "renamed" | "removed";
-  from?: string; summary: string; file?: string; operations?: Operation[];
+  from?: string; summary: string; why?: string; file?: string;
+  fields?: Part[]; operations?: Part[];
+  /** A serialized instance. An object is pretty-printed as JSON; a string is shown verbatim. */
+  example?: unknown;
 };
 export type Feature = {
   id: string; title: string; scenario: string; description: string;
