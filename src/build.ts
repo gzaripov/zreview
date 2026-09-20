@@ -11,6 +11,7 @@ import { $ } from "bun";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { validateDiagrams } from "./mermaid.ts";
 
 export type Shots = { before?: string; after?: string; caption?: string; before_src?: string; after_src?: string };
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
@@ -154,6 +155,7 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
   const review = await loadReview(reviewPath, opts.plan);
+  await validateDiagrams(review, reviewPath);
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;

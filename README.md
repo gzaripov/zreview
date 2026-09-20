@@ -30,7 +30,7 @@ Manually:
 
 ```bash
 git clone https://github.com/gzaripov/zreview ~/code/zreview
-cd ~/code/zreview && bun link
+cd ~/code/zreview && bun install && bun link
 ln -sfn ~/code/zreview/skill ~/.agents/skills/zreview
 ln -sfn ~/.agents/skills/zreview ~/.claude/skills/zreview
 ```

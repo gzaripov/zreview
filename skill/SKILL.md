@@ -85,7 +85,10 @@ tell a domain entity from `CodingKeys`. That judgment is yours.
 
 **`diagrams`** — Mermaid, when the feature changes control flow, state,
 persistence, or a component boundary. Names from the code; no fictional
-services. Leave empty when nothing moved — the page says so.
+services. Leave empty when nothing moved — the page says so. Every diagram is
+parsed before the page opens; one that does not parse is exit `2` naming the
+feature, the diagram and the line. Quote labels that contain `(`, `;`, `=` or
+`:`, as in `A["fetch(id)"]`.
 
 **`screenshots`** — when a user could see the change. A modification gets
 **before and after**. Render the before from the code you replaced, under the
