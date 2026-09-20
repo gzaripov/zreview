@@ -38,7 +38,7 @@
       const badge = s.decision === 'approved' ? 'approved' : s.decision === 'changes' ? 'changes' : 'open';
       const n = (s.comments || []).length, v = viewedCount(f);
       return `<button data-id="${esc(f.id)}" class="${f.id === current ? 'active' : ''}">
-        <span class="n">${i + 1}</span><span class="t">${esc(f.title)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}" title="files viewed">${v.seen}/${v.total} 👁</span>` : ''}<span class="badge ${badge}">${badge}</span></button>`;
+        <span class="n">${i + 1}</span><span class="t">${esc(f.title)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}" title="files viewed">${v.seen}/${v.total} 👁</span>` : ''}<span class="badge ${badge}">${badge === 'changes' ? 'changes requested' : badge}</span></button>`;
     }).join('');
     nav.querySelectorAll('button').forEach(b => b.onclick = () => { current = b.dataset.id; location.hash = current; render(); });
     const total = data.features.length, a = data.features.filter(f => state[f.id]?.decision === 'approved').length,
