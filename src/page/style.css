@@ -4,14 +4,14 @@
   --add-bg: #e6ffec; --add-gutter: #ccffd8; --del-bg: #ffebe9; --del-gutter: #ffd7d5; --hl: #fff8c5;
   --tk-kw: #cf222e; --tk-str: #0a3069; --tk-cm: #6e7781; --tk-num: #0550ae; --tk-fn: #8250df; --tk-attr: #953800; --tk-type: #953800;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1117; --panel: #161b22; --line: #30363d; --fg: #e6edf3; --muted: #8b949e;
-    --accent: #58a6ff; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --ok-bg: #12261e; --bad-bg: #2d1416;
-    --add-bg: #12261e; --add-gutter: #1a3a27; --del-bg: #2d1416; --del-gutter: #4a1c1c; --hl: #3d3305;
-    --tk-kw: #ff7b72; --tk-str: #a5d6ff; --tk-cm: #8b949e; --tk-num: #79c0ff; --tk-fn: #d2a8ff; --tk-attr: #ffa657; --tk-type: #ffa657;
-  }
+/* The head script stamps data-theme from the saved choice or the OS setting, so one block covers both. */
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161b22; --line: #30363d; --fg: #e6edf3; --muted: #8b949e;
+  --accent: #58a6ff; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --ok-bg: #12261e; --bad-bg: #2d1416;
+  --add-bg: #12261e; --add-gutter: #1a3a27; --del-bg: #2d1416; --del-gutter: #4a1c1c; --hl: #3d3305;
+  --tk-kw: #ff7b72; --tk-str: #a5d6ff; --tk-cm: #8b949e; --tk-num: #79c0ff; --tk-fn: #d2a8ff; --tk-attr: #ffa657; --tk-type: #ffa657;
 }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }
 a { color: var(--accent); }
@@ -21,8 +21,10 @@ pre { background: var(--panel); padding: 12px; border-radius: 6px; overflow: aut
 button { font: inherit; cursor: pointer; }
 
 .layout { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
-aside { border-right: 1px solid var(--line); background: var(--panel); padding: 20px 16px; position: sticky; top: 0; height: 100vh; overflow: auto; }
-aside h1 { font-size: 15px; margin: 0 0 4px; line-height: 1.3; }
+aside { position: relative; border-right: 1px solid var(--line); background: var(--panel); padding: 20px 16px; position: sticky; top: 0; height: 100vh; overflow: auto; }
+aside h1 { font-size: 15px; margin: 0 36px 4px 0; line-height: 1.3; }
+.theme { position: absolute; top: 14px; right: 12px; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 14px; line-height: 1; }
+.theme:hover { color: var(--fg); border-color: var(--accent); }
 aside .meta { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
 aside .exposure { font-size: 13px; padding: 8px 10px; border-left: 3px solid var(--warn); background: var(--bg); margin-bottom: 18px; border-radius: 0 4px 4px 0; }
 
@@ -143,7 +145,7 @@ body.zoomed { overflow: hidden; }
 .hljs-deletion { color: var(--bad); }
 .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
 .lc { margin: 4px 8px 8px 6.8em; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 4px; background: var(--bg); font-family: -apple-system, system-ui, sans-serif; font-size: 13px; }
-.lc .who { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+.lc .who, .cm .who { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .lc .who button, .cm .who button { border: 0; background: none; color: var(--muted); padding: 0; font-size: 11px; }
 
 /* Composer: under a diff line, or floating under a text selection */

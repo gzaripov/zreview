@@ -1,8 +1,19 @@
 (() => {
   const data = JSON.parse(document.getElementById('review-data').textContent);
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
   marked.setOptions({ mangle: false, headerIds: false });
+
+  // ---- theme: data-theme on <html> is set before paint by a head script; here the toggle, and mermaid follows it
+  const root = document.documentElement, themeBtn = document.getElementById('theme');
+  const applyTheme = (t, persist) => {
+    root.dataset.theme = t;
+    if (persist) localStorage.setItem('zreview:theme', t);
+    themeBtn.textContent = t === 'dark' ? '☀' : '☾';
+    themeBtn.title = t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+    mermaid.initialize({ startOnLoad: false, theme: t === 'dark' ? 'dark' : 'default', securityLevel: 'strict' });
+  };
+  applyTheme(root.dataset.theme, false);
+  themeBtn.onclick = () => { applyTheme(root.dataset.theme === 'dark' ? 'light' : 'dark', true); render(); };
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!localStorage.getItem('zreview:theme')) { applyTheme(e.matches ? 'dark' : 'light', false); render(); } });
 
   // ---- state: { [featureId]: { decision, note, at, head, files: {path: hash}, viewed: {path: hash}, comments: [{ id, kind, file, side, line, section, quote, body, at }] } }
   // Served: the server hands the saved state in and takes every change back (the port changes per run, so

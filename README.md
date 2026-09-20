@@ -78,6 +78,8 @@ and the page degrades to file links.
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.
 - **Approve** or **Request changes** per feature, with a note.
+- **Theme** — the ☾/☀ button in the sidebar switches light and dark; the
+  page starts on your OS setting and remembers the switch.
 - **Submit review** returns the decision to the process. Close the tab
   instead and it returns `dismissed`. **Copy review summary** and **Export
   decisions.json** work with or without a server.
