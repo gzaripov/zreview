@@ -68,8 +68,9 @@ and the page degrades to file links.
   how many comments you left.
 - **Each feature** shows the user scenario, what changed, the entities it
   adds or changes (what each consists of, what you can do with it, why, and a
-  serialized example under a cut), architecture diagrams, before/after
-  screenshots, the diff, and how it was tested.
+  serialized example under a cut), architecture diagrams (hover one for a
+  full-screen button; Esc closes), before/after screenshots, the
+  syntax-highlighted diff, and how it was tested.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.

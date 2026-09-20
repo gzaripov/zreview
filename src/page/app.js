@@ -78,17 +78,49 @@
     </div>`;
   }
 
+  // Syntax highlighting: each side of a hunk is highlighted as one block so
+  // multi-line tokens survive, then split back into lines.
+  const LANG = { ts: 'typescript', tsx: 'typescript', mts: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    py: 'python', rb: 'ruby', rs: 'rust', kt: 'kotlin', kts: 'kotlin', h: 'c', cc: 'cpp', hpp: 'cpp', cs: 'csharp', sh: 'bash', zsh: 'bash',
+    yml: 'yaml', toml: 'ini', md: 'markdown', html: 'xml', vue: 'xml', svelte: 'xml', gql: 'graphql', dockerfile: 'dockerfile', makefile: 'makefile' };
+  function langOf(path) {
+    const name = path.split('/').pop().toLowerCase(), ext = name.includes('.') ? name.split('.').pop() : name;
+    const l = LANG[ext] ?? ext;
+    return window.hljs?.getLanguage(l) ? l : null;
+  }
+  function hlLines(text, lang) {
+    let html;
+    try { html = lang ? hljs.highlight(text, { language: lang, ignoreIllegals: true }).value : esc(text); } catch { html = esc(text); }
+    const out = [], open = []; let cur = '', last = 0, m;
+    const re = /(<span[^>]*>)|(<\/span>)|\n/g;
+    while ((m = re.exec(html))) {
+      cur += html.slice(last, m.index); last = re.lastIndex;
+      if (m[1]) { open.push(m[1]); cur += m[1]; }
+      else if (m[2]) { open.pop(); cur += m[2]; }
+      else { out.push(cur + '</span>'.repeat(open.length)); cur = open.join(''); }
+    }
+    out.push(cur + html.slice(last) + '</span>'.repeat(open.length));
+    return out;
+  }
+
   function hunks(f, file) {
     if (!file.hunks) return `<p class="none" style="padding:8px 12px">Diff not loaded. Run with the PR's diff (gh on PATH, or --diff).</p>`;
     if (!file.hunks.length) return `<p class="none" style="padding:8px 12px">${file.status === 'binary' ? 'Binary file.' : 'No text changes.'}</p>`;
     const cs = entry(f.id).comments.filter(c => c.kind === 'line' && c.file === file.path);
-    return file.hunks.map(h => `<div class="hunk"><div class="hh">${esc(h.header)}</div>${h.lines.map(l => {
-      const side = l.t === '-' ? 'old' : 'new', line = l.t === '-' ? l.old : l.new;
-      const mine = cs.filter(c => c.side === side && c.line === line);
-      return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${mine.length ? 'has' : ''}" data-side="${side}" data-line="${line}">
-        <span class="g">${l.old ?? ''}</span><span class="g">${l.new ?? ''}</span><span class="code">${esc(l.t + l.text)}</span></div>` +
-        mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
-    }).join('')}</div>`).join('');
+    const lang = langOf(file.path);
+    return file.hunks.map(h => {
+      const oh = hlLines(h.lines.filter(l => l.t !== '+').map(l => l.text).join('\n'), lang);
+      const nh = hlLines(h.lines.filter(l => l.t !== '-').map(l => l.text).join('\n'), lang);
+      let oi = 0, ni = 0;
+      return `<div class="hunk"><div class="hh">${esc(h.header)}</div>${h.lines.map(l => {
+        const side = l.t === '-' ? 'old' : 'new', line = l.t === '-' ? l.old : l.new;
+        const code = l.t === '-' ? oh[oi++] : l.t === '+' ? nh[ni++] : (oi++, nh[ni++]);
+        const mine = cs.filter(c => c.side === side && c.line === line);
+        return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${mine.length ? 'has' : ''}" data-side="${side}" data-line="${line}">
+          <span class="g">${l.old ?? ''}</span><span class="g">${l.new ?? ''}</span><span class="code"><span class="sign">${l.t}</span>${code}</span></div>` +
+          mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
+      }).join('')}</div>`;
+    }).join('');
   }
 
   function commentList(f) {
@@ -107,7 +139,7 @@
     if (!f) { main.innerHTML = '<p class="none">No features in review.json.</p>'; return; }
     const st = state[f.id] || {};
     const diagrams = (f.diagrams || []).length
-      ? f.diagrams.map((d, i) => `<figure><div class="diagram"><pre class="mermaid" id="mm-${i}">${esc(d.mermaid)}</pre></div><figcaption>${esc(d.title || '')}</figcaption></figure>`).join('')
+      ? f.diagrams.map((d, i) => `<figure><div class="diagram"><button class="fs" type="button" title="Full screen" aria-label="Full screen">⛶</button><pre class="mermaid" id="mm-${i}">${esc(d.mermaid)}</pre></div><figcaption>${esc(d.title || '')}</figcaption></figure>`).join('')
       : `<p class="none">No flow or boundary change, so no diagram.</p>`;
     const files = (f.files || []).map(file => fileBlock(f, file)).join('');
     const dis = submitted ? 'disabled' : '';
@@ -150,7 +182,28 @@
       try { await mermaid.run({ nodes: main.querySelectorAll('pre.mermaid') }); }
       catch (e) { main.querySelectorAll('pre.mermaid').forEach(p => p.insertAdjacentHTML('afterend', `<p class="none">Diagram failed to render: ${esc(e.message)}</p>`)); }
     }
+      main.querySelectorAll('.diagram .fs').forEach(b => b.onclick = () => openZoom(b.parentElement));
   }
+
+  // ---- full-screen diagram
+  const zoom = document.getElementById('zoom');
+  function openZoom(box) {
+    const svg = box.querySelector('svg');
+    if (!svg) return;
+    zoom.querySelector('.body').replaceChildren(svg.cloneNode(true));
+    zoom.querySelector('.cap').textContent = box.parentElement.querySelector('figcaption')?.textContent || '';
+    zoom.hidden = false;
+    document.body.classList.add('zoomed');
+    zoom.querySelector('.close').focus();
+  }
+  function closeZoom() {
+    if (zoom.hidden) return;
+    zoom.hidden = true;
+    document.body.classList.remove('zoomed');
+    zoom.querySelector('.body').replaceChildren();
+  }
+  zoom.querySelector('.close').onclick = closeZoom;
+  zoom.onclick = (e) => { if (e.target === zoom) closeZoom(); };
 
   // ---- composers
   let composer = null;
@@ -235,6 +288,6 @@
   };
   addEventListener('pagehide', () => { if (SERVED && !submitted) navigator.sendBeacon('/api/dismiss'); });
   addEventListener('hashchange', () => { current = location.hash.slice(1) || current; render(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeComposer(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeZoom(); closeComposer(); } });
   render();
 })();
