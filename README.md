@@ -65,12 +65,15 @@ and the page degrades to file links.
 ### In the page
 
 - **Sidebar** lists the features. The badge is the decision; a `✎` count is
-  how many comments you left.
+  how many comments you left; `2/5 👁` is how many of its files you marked
+  viewed.
 - **Each feature** shows the user scenario, what changed, the entities it
   adds or changes (what each consists of, what you can do with it, why, and a
   serialized example under a cut), architecture diagrams (hover one for a
   full-screen button; Esc closes), before/after screenshots, the
   syntax-highlighted diff, and how it was tested.
+- **Viewed** — a checkbox on each file in the diff, as on GitHub. Checking
+  it folds the file; the Diff heading counts them.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.
@@ -79,8 +82,12 @@ and the page degrades to file links.
   instead and it returns `dismissed`. **Copy review summary** and **Export
   decisions.json** work with or without a server.
 
-Decisions persist in the browser, keyed on `repo#number@head`, so reopening
-the same head shows them again and a review of a stale head is visibly stale.
+Decisions, notes, comments and viewed files persist across runs in
+`~/.local/state/zreview/<repo>#<number>.json` (or `$XDG_STATE_HOME`, or
+`$ZREVIEW_STATE_DIR`), keyed on the PR rather than the head, so a re-run after
+the author pushes resumes where you were. A decision made on an earlier head
+says so next to its timestamp. `--fresh` ignores the file and starts over. A
+static `build` keeps the state in the browser instead.
 
 ## The contract
 
@@ -130,6 +137,7 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 --no-open               do not launch a browser (prints the URL on stderr)
 --port <n>              fixed port instead of random
 --timeout <seconds>     give up as dismissed
+--fresh                 ignore the saved state for this PR
 --max-width <px>        screenshot width cap, default 1200
 --quality <n>           JPEG quality, default 82
 --no-reencode           inline screenshots as captured
@@ -185,8 +193,9 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 - `screenshots` is `null` when the feature has no user-visible surface; the
   page says so rather than leaving a blank. Paths are relative to `review.json`.
 - `files` are hashed into `#diff-<sha256>` links into the PR's Files tab and
-  matched against the diff for inline hunks. A path not in the PR is a dead
-  link, and the sidebar lists changed files no feature claimed.
+  matched against the diff for inline hunks. When a diff is available every
+  changed file must be claimed by a feature and every listed file must be in
+  the diff; otherwise zreview exits `2` naming the files, before any tab opens.
 
 ## Screenshots
 

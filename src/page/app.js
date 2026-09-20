@@ -4,11 +4,16 @@
   mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
   marked.setOptions({ mangle: false, headerIds: false });
 
-  // ---- state: { [featureId]: { decision, note, at, comments: [{ id, kind, file, side, line, section, quote, body, at }] } }
-  const key = `zreview:${data.pr.repo}#${data.pr.number}@${data.pr.head}`;
+  // ---- state: { [featureId]: { decision, note, at, head, viewed: [path], comments: [{ id, kind, file, side, line, section, quote, body, at }] } }
+  // Served: the server hands the saved state in and takes every change back (the port changes per run, so
+  // browser storage cannot carry it). Static: browser storage, keyed by PR so a new head keeps the state.
+  const key = `zreview:${data.pr.repo}#${data.pr.number}`;
   const load = () => { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; } };
-  const save = () => localStorage.setItem(key, JSON.stringify(state));
-  let state = load();
+  const save = () => {
+    localStorage.setItem(key, JSON.stringify(state));
+    if (SERVED) fetch('/api/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(state), keepalive: true }).catch(() => {});
+  };
+  let state = SERVED ? (INITIAL_STATE || {}) : load();
   let submitted = false;
   let current = location.hash.slice(1) || (data.features[0] && data.features[0].id);
   const expanded = {};                         // featureId -> Set of file paths open in the diff
@@ -24,11 +29,6 @@
     `<a href="${esc(data.pr.url)}">${esc(data.pr.repo)}#${data.pr.number}</a> · <code>${esc(data.pr.head)}</code> → ${esc(data.pr.base)}`;
   document.getElementById('pr-exposure').textContent = data.pr.exposure || '';
   if (SERVED) document.getElementById('submit').hidden = false;
-  if (data.unassigned?.length) {
-    const u = document.getElementById('unassigned');
-    u.hidden = false;
-    u.innerHTML = `<details><summary>${data.unassigned.length} changed file${data.unassigned.length === 1 ? '' : 's'} not claimed by any feature</summary><ul>${data.unassigned.map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>`;
-  }
 
   // ---- sidebar
   function renderNav() {
@@ -36,14 +36,24 @@
     nav.innerHTML = data.features.map((f, i) => {
       const s = state[f.id] || {};
       const badge = s.decision === 'approved' ? 'approved' : s.decision === 'changes' ? 'changes' : 'open';
-      const n = (s.comments || []).length;
+      const n = (s.comments || []).length, v = viewedCount(f);
       return `<button data-id="${esc(f.id)}" class="${f.id === current ? 'active' : ''}">
-        <span class="n">${i + 1}</span><span class="t">${esc(f.title)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}<span class="badge ${badge}">${badge}</span></button>`;
+        <span class="n">${i + 1}</span><span class="t">${esc(f.title)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}" title="files viewed">${v.seen}/${v.total} 👁</span>` : ''}<span class="badge ${badge}">${badge}</span></button>`;
     }).join('');
     nav.querySelectorAll('button').forEach(b => b.onclick = () => { current = b.dataset.id; location.hash = current; render(); });
     const total = data.features.length, a = data.features.filter(f => state[f.id]?.decision === 'approved').length,
           c = data.features.filter(f => state[f.id]?.decision === 'changes').length;
     document.getElementById('tally').textContent = `${a} approved · ${c} changes requested · ${total - a - c} open`;
+  }
+
+  // ---- viewed files
+  const viewedSet = (f) => new Set(entry(f.id).viewed ||= []);
+  const viewedCount = (f) => { const set = viewedSet(f), files = f.files || []; return { seen: files.filter(x => set.has(x.path)).length, total: files.length }; };
+  function toggleViewed(f, path, on) {
+    const set = viewedSet(f); on ? set.add(path) : set.delete(path);
+    entry(f.id).viewed = [...set];
+    if (on) expanded[f.id]?.delete(path);           // like GitHub: a viewed file folds
+    save(); render();
   }
 
   // ---- blocks
@@ -70,10 +80,10 @@
   }
 
   function fileBlock(f, file) {
-    const open = expanded[f.id]?.has(file.path);
+    const open = expanded[f.id]?.has(file.path), seen = viewedSet(f).has(file.path);
     const stat = file.hunks ? `<span class="stat"><span class="a">+${file.add}</span> <span class="d">−${file.del}</span></span>` : '';
-    return `<div class="file" data-path="${esc(file.path)}">
-      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a></div>
+    return `<div class="file ${seen ? 'seen' : ''}" data-path="${esc(file.path)}">
+      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
       ${open ? hunks(f, file) : ''}
     </div>`;
   }
@@ -143,6 +153,8 @@
       : `<p class="none">No flow or boundary change, so no diagram.</p>`;
     const files = (f.files || []).map(file => fileBlock(f, file)).join('');
     const dis = submitted ? 'disabled' : '';
+    const v = viewedCount(f);
+    const decidedAt = st.decision ? `Decided ${new Date(st.at).toLocaleString()}${st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)} (now ${data.pr.head.slice(0, 7)})` : ''}` : 'No decision yet';
 
     main.innerHTML = `
       <h2>${esc(f.title)}</h2>
@@ -151,19 +163,19 @@
       <div class="section"><h3>Entities</h3>${entities(f)}</div>
       <div class="section"><h3>Architecture</h3>${diagrams}</div>
       <div class="section"><h3>Before / after</h3>${shots(f.screenshots)}</div>
-      <div class="section"><h3>Diff</h3>${files || '<p class="none">No files listed.</p>'}</div>
+      <div class="section"><h3>Diff${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}</h3>${files || '<p class="none">No files listed.</p>'}</div>
       <div class="section"><h3>How it was tested</h3><div class="prose commentable" data-section="tested">${md(f.tested) || '<p class="none">Not stated.</p>'}</div></div>
       <div class="section"><h3>Comments</h3>${commentList(f)}</div>
       <div class="decide">
         <div class="row">
           <button class="approve ${st.decision === 'approved' ? 'on' : ''}" ${dis}>Approve</button>
           <button class="changes ${st.decision === 'changes' ? 'on' : ''}" ${dis}>Request changes</button>
-          <span class="state">${st.decision ? `Decided ${new Date(st.at).toLocaleString()}` : 'No decision yet'}</span>
+          <span class="state">${decidedAt}</span>
         </div>
         <textarea placeholder="Note for the author (optional)" ${dis}>${esc(st.note || '')}</textarea>
       </div>`;
 
-    const decide = (decision) => { Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now() }); save(); render(); };
+    const decide = (decision) => { Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head }); save(); render(); };
     main.querySelector('.approve').onclick = () => decide('approved');
     main.querySelector('.changes').onclick = () => decide('changes');
     main.querySelector('.decide textarea').onblur = (e) => { if (state[f.id]) { state[f.id].note = e.target.value; save(); } };
@@ -172,6 +184,7 @@
       const p = h.parentElement.dataset.path; const set = (expanded[f.id] ||= new Set());
       set.has(p) ? set.delete(p) : set.add(p); render();
     });
+    main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, cb.closest('.file').dataset.path, cb.checked));
     main.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row); });
     main.querySelectorAll('[data-del]').forEach(b => b.onclick = (e) => {
       e.stopPropagation(); const cs = entry(f.id).comments; cs.splice(cs.findIndex(c => c.id === b.dataset.del), 1); save(); render();

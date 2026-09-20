@@ -37,9 +37,8 @@ export type Feature = {
 export type Review = {
   pr: { repo: string; number: number; url: string; title: string; base: string; head: string; exposure?: string };
   features: Feature[];
-  unassigned?: string[];
 };
-export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string };
+export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string; state?: Record<string, unknown> | null };
 
 /** Parse a unified diff (git / `gh pr diff`) into per-file hunks with old and new line numbers. */
 export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
@@ -139,7 +138,15 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     if (shots?.before) shots.before_src = await dataUri(shots.before, base, opts, log);
     if (shots?.after) shots.after_src = await dataUri(shots.after, base, opts, log);
   }
-  if (diffs) review.unassigned = [...diffs.keys()].filter((p) => !claimed.has(p)).sort();
+  if (diffs) {
+    const unclaimed = [...diffs.keys()].filter((p) => !claimed.has(p)).sort();
+    const missing = [...claimed].filter((p) => !diffs.has(p)).sort();
+    const problems = [
+      ...unclaimed.map((p) => `${p}: changed in the PR but no feature lists it`),
+      ...missing.map((p) => `${p}: listed by a feature but not changed in the PR`),
+    ];
+    if (problems.length) throw new ReviewError(`${reviewPath}: ${problems.length} file${problems.length === 1 ? "" : "s"} out of step with the PR:\n  ${problems.join("\n  ")}`);
+  }
   const payload = JSON.stringify(review).replaceAll("</", "<\\/");
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all(
@@ -149,6 +156,7 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     .replace("__TITLE__", `Review: ${review.pr.repo}#${review.pr.number}`)
     .replace("__STYLE__", () => style)
     .replace("__SERVED__", String(opts.served))
+    .replace("__STATE__", () => JSON.stringify(opts.state ?? null).replaceAll("</", "<\\/"))
     .replace("__REVIEW_JSON__", () => payload)
     .replace("__APP__", () => app);
   return { html, review, log };

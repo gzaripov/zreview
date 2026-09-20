@@ -33,14 +33,12 @@ nav button:hover { background: var(--bg); }
 nav button.active { background: var(--bg); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 nav .n { color: var(--muted); font-variant-numeric: tabular-nums; width: 1.6em; flex: none; }
 nav .t { flex: 1; }
-nav .c { font-size: 11px; color: var(--muted); flex: none; }
+nav .c, nav .v { font-size: 11px; color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+nav .v.all { color: var(--ok); }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); flex: none; }
 .badge.approved { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
 .badge.changes { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
 
-.unassigned { margin-top: 14px; font-size: 12px; color: var(--muted); }
-.unassigned summary { cursor: pointer; }
-.unassigned li { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .tally { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .tally button { display: block; width: 100%; margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .tally button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
@@ -51,6 +49,8 @@ main { padding: 28px 40px 80px; max-width: 1100px; }
 main h2 { font-size: 24px; margin: 0 0 6px; }
 .section { margin-top: 28px; }
 .section h3 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.section h3 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+.section h3 .sub.all { color: var(--ok); }
 .scenario { font-size: 17px; padding: 14px 18px; border-left: 3px solid var(--accent); background: var(--panel); border-radius: 0 6px 6px 0; }
 .prose p { margin: 0 0 12px; }
 .commentable mark.hl { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 1px; cursor: help; }
@@ -86,6 +86,9 @@ body.zoomed { overflow: hidden; }
 .file > .fh .stat .a { color: var(--ok); } .file > .fh .stat .d { color: var(--bad); }
 .file > .fh .st { font-size: 11px; color: var(--muted); }
 .file > .fh a { font-size: 12px; }
+.file > .fh .viewed { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.file > .fh .viewed input { margin: 0; accent-color: var(--ok); }
+.file.seen > .fh .path { color: var(--muted); }
 .file > .fh .tri { color: var(--muted); width: 1em; }
 .hunk { border-top: 1px solid var(--line); }
 
