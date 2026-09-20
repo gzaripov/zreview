@@ -28,16 +28,19 @@ aside .exposure { font-size: 13px; padding: 8px 10px; border-left: 3px solid var
 
 /* Active state changes border and background only. Changing weight changes width, which changes wrapping, which
    changes height, so the list jumps under the pointer. */
-nav button { display: flex; width: 100%; text-align: left; align-items: center; gap: 8px; padding: 9px 10px; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--fg); }
+nav button { display: flex; width: 100%; text-align: left; align-items: flex-start; gap: 8px; padding: 9px 10px; margin-bottom: 4px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--fg); }
 nav button:hover { background: var(--bg); }
 nav button.active { background: var(--bg); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 nav .n { color: var(--muted); font-variant-numeric: tabular-nums; width: 1.6em; flex: none; }
-nav .t { flex: 1; }
+nav .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+nav .t { line-height: 1.35; }
+nav .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 nav .c, nav .v { font-size: 11px; color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
 nav .v.all { color: var(--ok); }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); flex: none; }
 .badge.approved { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
 .badge.changes { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
+.badge.updated { color: var(--warn); border-color: var(--warn); background: var(--hl); }
 
 .tally { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .tally button { display: block; width: 100%; margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
@@ -85,6 +88,7 @@ body.zoomed { overflow: hidden; }
 .file > .fh .stat { font-size: 12px; font-variant-numeric: tabular-nums; }
 .file > .fh .stat .a { color: var(--ok); } .file > .fh .stat .d { color: var(--bad); }
 .file > .fh .st { font-size: 11px; color: var(--muted); }
+.file > .fh .upd { font-size: 11px; color: var(--warn); border: 1px solid var(--warn); border-radius: 10px; padding: 0 7px; background: var(--hl); white-space: nowrap; }
 .file > .fh a { font-size: 12px; }
 .file > .fh .viewed { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); cursor: pointer; }
 .file > .fh .viewed input { margin: 0; accent-color: var(--ok); }

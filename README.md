@@ -85,8 +85,10 @@ and the page degrades to file links.
 Decisions, notes, comments and viewed files persist across runs in
 `~/.local/state/zreview/<repo>#<number>.json` (or `$XDG_STATE_HOME`, or
 `$ZREVIEW_STATE_DIR`), keyed on the PR rather than the head, so a re-run after
-the author pushes resumes where you were. A decision made on an earlier head
-says so next to its timestamp. `--fresh` ignores the file and starts over. A
+the author pushes resumes where you were. A decision remembers what each
+file's hunks looked like; when the author reworks a feature's files, its badge
+turns to **updated**, the reworked files are marked in the diff, and their
+Viewed checks clear. Decide again to clear it. `--fresh` ignores the file and starts over. A
 static `build` keeps the state in the browser instead.
 
 ## The contract

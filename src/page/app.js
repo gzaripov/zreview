@@ -4,7 +4,7 @@
   mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
   marked.setOptions({ mangle: false, headerIds: false });
 
-  // ---- state: { [featureId]: { decision, note, at, head, viewed: [path], comments: [{ id, kind, file, side, line, section, quote, body, at }] } }
+  // ---- state: { [featureId]: { decision, note, at, head, files: {path: hash}, viewed: {path: hash}, comments: [{ id, kind, file, side, line, section, quote, body, at }] } }
   // Served: the server hands the saved state in and takes every change back (the port changes per run, so
   // browser storage cannot carry it). Static: browser storage, keyed by PR so a new head keeps the state.
   const key = `zreview:${data.pr.repo}#${data.pr.number}`;
@@ -35,10 +35,13 @@
     const nav = document.getElementById('nav');
     nav.innerHTML = data.features.map((f, i) => {
       const s = state[f.id] || {};
-      const badge = s.decision === 'approved' ? 'approved' : s.decision === 'changes' ? 'changes' : 'open';
+      const upd = changedSince(f).length;
+      const badge = upd ? 'updated' : s.decision === 'approved' ? 'approved' : s.decision === 'changes' ? 'changes' : 'open';
+      const label = badge === 'changes' ? 'changes requested' : badge;
       const n = (s.comments || []).length, v = viewedCount(f);
       return `<button data-id="${esc(f.id)}" class="${f.id === current ? 'active' : ''}">
-        <span class="n">${i + 1}</span><span class="t">${esc(f.title)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}" title="files viewed">${v.seen}/${v.total} 👁</span>` : ''}<span class="badge ${badge}">${badge === 'changes' ? 'changes requested' : badge}</span></button>`;
+        <span class="n">${i + 1}</span><span class="body"><span class="t">${esc(f.title)}</span>
+        <span class="meta">${n ? `<span class="c">${n} ✎</span>` : ''}${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}" title="files viewed">${v.seen}/${v.total} 👁</span>` : ''}<span class="badge ${badge}" title="${upd ? `${upd} file${upd === 1 ? '' : 's'} changed since your decision` : ''}">${label}</span></span></span></button>`;
     }).join('');
     nav.querySelectorAll('button').forEach(b => b.onclick = () => { current = b.dataset.id; location.hash = current; render(); });
     const total = data.features.length, a = data.features.filter(f => state[f.id]?.decision === 'approved').length,
@@ -46,14 +49,29 @@
     document.getElementById('tally').textContent = `${a} approved · ${c} changes requested · ${total - a - c} open`;
   }
 
-  // ---- viewed files
-  const viewedSet = (f) => new Set(entry(f.id).viewed ||= []);
-  const viewedCount = (f) => { const set = viewedSet(f), files = f.files || []; return { seen: files.filter(x => set.has(x.path)).length, total: files.length }; };
-  function toggleViewed(f, path, on) {
-    const set = viewedSet(f); on ? set.add(path) : set.delete(path);
-    entry(f.id).viewed = [...set];
-    if (on) expanded[f.id]?.delete(path);           // like GitHub: a viewed file folds
+  // ---- file fingerprints: a file is "the same" while its hunks are. A viewed mark and a decision both
+  // remember the fingerprints they were made against, so a reworked file comes back unviewed and a
+  // feature whose files were reworked after a decision shows as updated.
+  const fhash = (file) => {
+    if (!file.hunks) return null;
+    const s = JSON.stringify(file.hunks); let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(16);
+  };
+  const fingerprints = (f) => Object.fromEntries((f.files || []).map(file => [file.path, fhash(file)]));
+  const isViewed = (f, file) => { const v = entry(f.id).viewed ||= {}; return file.path in v && v[file.path] === fhash(file); };
+  const viewedCount = (f) => { const files = f.files || []; return { seen: files.filter(x => isViewed(f, x)).length, total: files.length }; };
+  function toggleViewed(f, file, on) {
+    const v = entry(f.id).viewed ||= {};
+    on ? v[file.path] = fhash(file) : delete v[file.path];
+    if (on) expanded[f.id]?.delete(file.path);      // like GitHub: a viewed file folds
     save(); render();
+  }
+  /** Paths whose hunks differ from what the current decision was made against. */
+  function changedSince(f) {
+    const st = state[f.id]; if (!st?.decision || !st.files) return [];
+    const now = fingerprints(f), then = st.files;
+    return [...new Set([...Object.keys(now), ...Object.keys(then)])].filter(p => now[p] !== then[p] && (now[p] ?? then[p]) !== null).sort();
   }
 
   // ---- blocks
@@ -80,10 +98,10 @@
   }
 
   function fileBlock(f, file) {
-    const open = expanded[f.id]?.has(file.path), seen = viewedSet(f).has(file.path);
+    const open = expanded[f.id]?.has(file.path), seen = isViewed(f, file), upd = changedSince(f).includes(file.path);
     const stat = file.hunks ? `<span class="stat"><span class="a">+${file.add}</span> <span class="d">−${file.del}</span></span>` : '';
     return `<div class="file ${seen ? 'seen' : ''}" data-path="${esc(file.path)}">
-      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
+      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">updated since your decision</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
       ${open ? hunks(f, file) : ''}
     </div>`;
   }
@@ -154,7 +172,9 @@
     const files = (f.files || []).map(file => fileBlock(f, file)).join('');
     const dis = submitted ? 'disabled' : '';
     const v = viewedCount(f);
-    const decidedAt = st.decision ? `Decided ${new Date(st.at).toLocaleString()}${st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)} (now ${data.pr.head.slice(0, 7)})` : ''}` : 'No decision yet';
+    const upd = changedSince(f);
+    const decidedAt = !st.decision ? 'No decision yet'
+      : `Decided ${new Date(st.at).toLocaleString()}${st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}${upd.length ? `. <b>${upd.length} file${upd.length === 1 ? '' : 's'} changed since</b>, decide again.` : ''}`;
 
     main.innerHTML = `
       <h2>${esc(f.title)}</h2>
@@ -175,7 +195,7 @@
         <textarea placeholder="Note for the author (optional)" ${dis}>${esc(st.note || '')}</textarea>
       </div>`;
 
-    const decide = (decision) => { Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head }); save(); render(); };
+    const decide = (decision) => { Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head, files: fingerprints(f) }); save(); render(); };
     main.querySelector('.approve').onclick = () => decide('approved');
     main.querySelector('.changes').onclick = () => decide('changes');
     main.querySelector('.decide textarea').onblur = (e) => { if (state[f.id]) { state[f.id].note = e.target.value; save(); } };
@@ -184,7 +204,7 @@
       const p = h.parentElement.dataset.path; const set = (expanded[f.id] ||= new Set());
       set.has(p) ? set.delete(p) : set.add(p); render();
     });
-    main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, cb.closest('.file').dataset.path, cb.checked));
+    main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, f.files.find(x => x.path === cb.closest('.file').dataset.path), cb.checked));
     main.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row); });
     main.querySelectorAll('[data-del]').forEach(b => b.onclick = (e) => {
       e.stopPropagation(); const cs = entry(f.id).comments; cs.splice(cs.findIndex(c => c.id === b.dataset.del), 1); save(); render();

@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Review } from "./build.ts";
 
-export type FeatureState = { decision?: "approved" | "changes"; note?: string; at?: number; head?: string; comments?: unknown[]; viewed?: string[] };
+export type FeatureState = { decision?: "approved" | "changes"; note?: string; at?: number; head?: string; files?: Record<string, string | null>; viewed?: Record<string, string | null>; comments?: unknown[] };
 export type ReviewState = Record<string, FeatureState>;
 type Stored = { repo: string; number: number; head: string; savedAt: number; features: ReviewState };
 
