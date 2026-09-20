@@ -1,8 +1,9 @@
 // Serve the review page on a random localhost port and block until the
-// reviewer decides. The page POSTs /api/decision on Submit and beacons
-// /api/dismiss when the tab closes without submitting.
+// reviewer decides. The page POSTs /api/state on every change, /api/decision
+// on Submit, and beacons /api/dismiss when the tab closes without submitting.
 
 import type { Review } from "./build.ts";
+import { saveState, type ReviewState } from "./state.ts";
 
 export type FeatureDecision = { decision: "approved" | "changes"; note?: string; at?: number };
 export type Outcome = {
@@ -11,7 +12,7 @@ export type Outcome = {
   summary: string;
   url: string;
 };
-export type ServeOptions = { port: number; open: boolean; timeoutSeconds?: number };
+export type ServeOptions = { port: number; open: boolean; timeoutSeconds?: number; persist: boolean };
 
 /** All features approved -> approved. Any changes requested -> changes. Otherwise something was left open. */
 export function classify(review: Review, features: Record<string, FeatureDecision>): Outcome["decision"] {
@@ -39,6 +40,11 @@ export function serve(html: string, review: Review, opts: ServeOptions): Promise
       const { pathname } = new URL(req.url);
       if (req.method === "GET" && pathname === "/") {
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+      }
+      if (req.method === "POST" && pathname === "/api/state") {
+        const features = (await req.json()) as ReviewState;
+        if (opts.persist) await saveState(review.pr, features).catch((e) => console.error(`zreview: could not save state: ${(e as Error).message}`));
+        return Response.json({ ok: true });
       }
       if (req.method === "POST" && pathname === "/api/decision") {
         const body = (await req.json()) as { features?: Record<string, FeatureDecision>; summary?: string };

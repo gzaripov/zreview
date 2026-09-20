@@ -86,8 +86,11 @@ a different bug. Look at it and confirm the symptom shows. Delete any capture
 harness before committing. `null` when there is no user-visible surface; the
 page prints the absence. The builder inlines the images, so nothing is uploaded.
 
-**`files`** — exactly as `gh pr diff --name-only` spells them. A path not in
-the PR is a dead link.
+**`files`** — exactly as `gh pr diff --name-only` spells them, and every one
+of them: zreview compares the features' files to the diff and exits `2`
+naming any changed file no feature claims, or any listed path the PR does not
+change. A lockfile or generated file belongs to the feature whose change
+produced it.
 
 **`tested`** — per feature. The command, the observed result, what is not
 covered. If nothing ran, say so and name what a reviewer should run. Never
@@ -105,7 +108,10 @@ zreview review review.json --json --result-file decision.json
 
 `zreview review` fetches the PR's diff through `gh pr diff` (or takes
 `--diff <file>`), opens the page, and **blocks**. Run it with a long or no
-timeout, or in the background, and read stdout when it returns.
+timeout, or in the background, and read stdout when it returns. The
+reviewer's decisions, comments and viewed files persist per PR across runs,
+so after you address `changes` and push, re-run the same way and they resume
+where they were; pass `--fresh` only if they ask to start over.
 
 | `decision` | Meaning |
 |---|---|

@@ -19,16 +19,19 @@ import { dirname } from "node:path";
 import { $ } from "bun";
 import { buildHtml, loadReview, ReviewError } from "./build.ts";
 import { serve, type Outcome } from "./serve.ts";
+import { loadState, statePath } from "./state.ts";
 
 const USAGE = `zreview — review a pull request one feature at a time
 
   zreview review <review.json> [--json] [--require-approval] [--result-file <path>]
-                               [--no-open] [--port <n>] [--timeout <seconds>]
+                               [--no-open] [--port <n>] [--timeout <seconds>] [--fresh]
   zreview build  <review.json> [-o <review.html>]
 
   both: [--max-width <px>] [--quality <n>] [--no-reencode]
 
 review  serves the page, opens it, blocks until you decide, prints the decision
+        decisions, comments and viewed files persist per PR under ~/.local/state/zreview;
+        --fresh starts over
 build   writes a self-contained review.html and exits
 
 stdout  the Markdown summary; one JSON record with --json; nothing when dismissed
@@ -92,6 +95,7 @@ const { values: opt, positionals } = parseArgs({
     quality: { type: "string", default: "82" },
     "no-reencode": { type: "boolean", default: false },
     diff: { type: "string" },
+    fresh: { type: "boolean", default: false },
   },
   allowPositionals: true,
 });
@@ -100,11 +104,14 @@ if (opt["result-file"]) await checkResultPath(opt["result-file"]);
 
 try {
   const pr = (await loadReview(src)).pr;
+  const state = opt.fresh ? null : await loadState(pr);
+  if (state) console.error(`zreview: resuming from ${statePath(pr)} (--fresh to start over)`);
   const built = await buildHtml(src, {
     maxWidth: opt["no-reencode"] ? 0 : Number(opt["max-width"]),
     quality: Number(opt.quality),
     served: command === "review",
     diffText: await loadDiff(opt.diff, pr.repo, pr.number),
+    state,
   });
 
   if (command === "build") {
@@ -120,6 +127,7 @@ try {
     port: Number(opt.port),
     open: !opt["no-open"],
     timeoutSeconds: opt.timeout ? Number(opt.timeout) : undefined,
+    persist: true,
   });
 
   if (opt.json) console.log(JSON.stringify(outcome));
