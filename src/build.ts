@@ -23,8 +23,10 @@ export type Entity = {
   name: string; kind?: string; change: "added" | "changed" | "renamed" | "removed";
   from?: string; summary: string; why?: string; file?: string;
   fields?: Part[]; operations?: Part[];
-  /** A serialized instance. An object is pretty-printed as JSON; a string is shown verbatim. */
+  /** A serialized instance. An object is pretty-printed as JSON; a string is shown verbatim. Kept for old review.json files; prefer `examples`. */
   example?: unknown;
+  /** Serialized instances: a default that covers most fields first, then edge cases. Shown as tabs in a read-only editor. */
+  examples?: { title: string; note?: string; lang?: string; value: unknown }[];
 };
 export type Feature = {
   id: string; title: string; scenario: string; description: string;

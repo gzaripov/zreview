@@ -69,7 +69,7 @@ and the page degrades to file links.
   viewed.
 - **Each feature** shows the user scenario, what changed, the entities it
   adds or changes (what each consists of, what you can do with it, why, and a
-  serialized example under a cut), architecture diagrams (hover one for a
+  serialized examples beside them, in an editor with a tab per case), architecture diagrams (hover one for a
   full-screen button; Esc closes), before/after screenshots, the
   syntax-highlighted diff, and how it was tested.
 - **Viewed** — a checkbox on each file in the diff, as on GitHub. Checking
@@ -175,10 +175,13 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 - `entities` are the domain types a feature adds, changes, renames, or
   removes. Each has `fields` (what it consists of) and `operations` (what you
   can do with it); every part carries a `meaning` and, where it matters, a
-  `why`. `renamed` entities carry `from`. An `example` is a serialized
-  instance, shown under a collapsed *Example*. A grep can list every struct in
-  a diff; it cannot tell a domain entity from `CodingKeys`, so this is
-  authored judgment:
+  `why`. `renamed` entities carry `from`. `examples` are serialized
+  instances, shown beside the fields in a read-only editor with a tab per
+  case: a default that fills most fields first, then edge cases, each with a
+  `title` and an optional `note` (and `lang` for a string value that is not
+  JSON). A single `example` still works. A grep can list every struct in a
+  diff; it cannot tell a domain entity from `CodingKeys`, so this is authored
+  judgment:
 
   ```json
   "entities": [
@@ -191,7 +194,10 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
       "operations": [
         { "name": "decodeWordPack", "type": "(bytes: Uint8Array) → WordPack",
           "meaning": "Enforces the 65,536-byte ceiling first, then parses." } ],
-      "example": { "momo": 1, "kind": "spinoff", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ] } } ]
+      "examples": [
+        { "title": "Lesson with theory", "value": { "momo": 1, "kind": "spinoff", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ], "theory": [ { "title": "Ordering", "body": "Point and say the name." } ] } },
+        { "title": "Word list, no theory", "note": "The wire value is still spinoff.", "value": { "momo": 1, "kind": "spinoff", "title": "Verbs", "words": [ { "surface": "食べる" } ] } },
+        { "title": "At the byte ceiling", "note": "65,536 bytes exactly; one more is rejected before parsing.", "value": { "momo": 1, "kind": "spinoff", "title": "…", "words": [] } } ] } ]
   ```
 
 - `screenshots` is `null` when the feature has no user-visible surface; the

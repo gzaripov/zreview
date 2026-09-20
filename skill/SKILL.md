@@ -71,9 +71,15 @@ removes. Each has `fields` (what it consists of) and `operations` (what you can
 do with it); every part carries a `meaning` and, where it matters, a `why`. The
 reasoning is the point — `kind: Kind` tells a reviewer nothing, *"a word list,
 or a lesson that adds theory on top; the wire value stays `spinoff` so shipped
-packs keep decoding"* tells them everything. Add an `example`: a serialized
-instance. A grep lists every struct in a diff; it cannot tell a domain entity
-from `CodingKeys`. That judgment is yours.
+packs keep decoding"* tells them everything. Add `examples`: serialized
+instances, each with a `title`, an optional one-line `note`, and the `value`.
+The first is the default: an instance that fills most of the fields, the one
+a reviewer pictures when they read the type. Then two or three cases that
+exercise the edges — the minimal valid instance, a boundary (a maximum
+length, an empty list, a zero), a legacy or wire-compatibility shape, an
+instance that looks wrong but is valid or the reverse. Say in the `note` why
+each edge is worth looking at. A grep lists every struct in a diff; it cannot
+tell a domain entity from `CodingKeys`. That judgment is yours.
 
 **`diagrams`** — Mermaid, when the feature changes control flow, state,
 persistence, or a component boundary. Names from the code; no fictional

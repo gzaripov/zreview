@@ -2,6 +2,8 @@
   const data = JSON.parse(document.getElementById('review-data').textContent);
   marked.setOptions({ mangle: false, headerIds: false });
 
+  let monacoApi = null; const editors = [];   // Monaco, once its CDN load resolves; see below
+
   // ---- theme: data-theme on <html> is set before paint by a head script; here the toggle, and mermaid follows it
   const root = document.documentElement, themeBtn = document.getElementById('theme');
   const applyTheme = (t, persist) => {
@@ -10,6 +12,7 @@
     themeBtn.textContent = t === 'dark' ? '☀' : '☾';
     themeBtn.title = t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
     mermaid.initialize({ startOnLoad: false, theme: t === 'dark' ? 'dark' : 'default', securityLevel: 'strict' });
+    if (monacoApi) monacoApi.editor.setTheme(t === 'dark' ? 'zreview-dark' : 'zreview-light');
   };
   applyTheme(root.dataset.theme, false);
   themeBtn.onclick = () => { applyTheme(root.dataset.theme === 'dark' ? 'light' : 'dark', true); render(); };
@@ -99,13 +102,70 @@
     const parts = (label, ps, own) => ps?.length ? `<div class="parts"><div class="plabel">${label}</div>
       ${ps.map(p => `<div class="part ${p.change || ''}"><div class="pname"><code>${esc(p.name)}</code>${p.type ? `<span class="ptype">${esc(p.type)}</span>` : ''}${chip(p.change, own)}</div>
         <div class="pmeaning">${esc(p.meaning)}${p.why ? `<div class="pwhy">${esc(p.why)}</div>` : ''}</div></div>`).join('')}</div>` : '';
-    const example = (e) => e.example === undefined ? '' :
-      `<details class="example"><summary>Example</summary><pre class="ex"><code>${esc(typeof e.example === 'string' ? e.example : JSON.stringify(e.example, null, 2))}</code></pre></details>`;
-    return es.map(e => `<div class="entity ${e.change}">
+    const examplesOf = (e) => e.examples?.length ? e.examples : e.example !== undefined ? [{ title: 'Example', value: e.example }] : [];
+    const examples = (e, i) => {
+      const exs = examplesOf(e);
+      if (!exs.length) return '';
+      return `<div class="examples" data-entity="${i}">
+        <div class="tabs">${exs.map((x, j) => `<button type="button" class="${j ? '' : 'on'}" data-ex="${j}">${esc(x.title || `Example ${j + 1}`)}</button>`).join('')}</div>
+        ${exs.map((x, j) => `<div class="ex" data-ex="${j}" ${j ? 'hidden' : ''}>${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}<div class="editor"><pre><code>${esc(exampleText(x))}</code></pre></div></div>`).join('')}
+      </div>`;
+    };
+    return es.map((e, i) => `<div class="entity ${e.change} ${examplesOf(e).length ? 'with-examples' : ''}">
       <div class="eh"><span class="chip ${e.change}">${e.change}</span><span class="ename">${esc(e.name)}</span>${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}${e.file ? `<span class="efile">${esc(e.file)}</span>` : ''}</div>
-      <div class="esum">${esc(e.summary)}${e.why ? `<div class="ewhy">${esc(e.why)}</div>` : ''}</div>
-      ${parts('Consists of', e.fields, e.change)}${parts('What you can do', e.operations, e.change)}${example(e)}
+      <div class="ebody"><div class="etext">
+        <div class="esum">${esc(e.summary)}${e.why ? `<div class="ewhy">${esc(e.why)}</div>` : ''}</div>
+        ${parts('Consists of', e.fields, e.change)}${parts('What you can do', e.operations, e.change)}
+      </div>${examples(e, i)}</div>
     </div>`).join('');
+  }
+  const exampleText = (x) => typeof x.value === 'string' ? x.value : JSON.stringify(x.value, null, 2);
+  const exampleLang = (x) => x.lang || (typeof x.value === 'string' ? 'plaintext' : 'json');
+
+  // ---- Monaco for examples: read-only, sized to content, themed with the page. Loaded from the CDN
+  // after the page is up; until then (or without a network) the <pre> underneath stays.
+  const MONACO = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min';
+  const monacoReady = new Promise((done) => {
+    if (!window.require?.config) return done(null);
+    window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob(
+      [`self.MonacoEnvironment={baseUrl:'${MONACO}/'};importScripts('${MONACO}/vs/base/worker/workerMain.js');`], { type: 'text/javascript' })) };
+    require.config({ paths: { vs: `${MONACO}/vs` } });
+    require(['vs/editor/editor.main'], () => {
+      const m = window.monaco;
+      const rules = (kw, key, str, num, cm) => [
+        { token: 'keyword', foreground: kw }, { token: 'string.key.json', foreground: key }, { token: 'string.value.json', foreground: str },
+        { token: 'string', foreground: str }, { token: 'number', foreground: num }, { token: 'comment', foreground: cm, fontStyle: 'italic' },
+        { token: 'delimiter', foreground: cm }, { token: 'type', foreground: key }, { token: 'attribute.name', foreground: key }, { token: 'attribute.value', foreground: str },
+      ];
+      m.editor.defineTheme('zreview-light', { base: 'vs', inherit: true, rules: rules('cf222e', '0550ae', '0a3069', '0550ae', '6e7781'),
+        colors: { 'editor.background': '#f6f8fa', 'editorLineNumber.foreground': '#8c959f', 'editorLineNumber.activeForeground': '#1f2328', 'editor.foreground': '#1f2328', 'editorGutter.background': '#f6f8fa', 'editorBracketHighlight.foreground1': '#0969da', 'editorBracketHighlight.foreground2': '#8250df', 'editorBracketHighlight.foreground3': '#bf3989' } });
+      m.editor.defineTheme('zreview-dark', { base: 'vs-dark', inherit: true, rules: rules('ff7b72', '79c0ff', 'a5d6ff', '79c0ff', '8b949e'),
+        colors: { 'editor.background': '#161b22', 'editorLineNumber.foreground': '#6e7681', 'editorLineNumber.activeForeground': '#e6edf3', 'editor.foreground': '#e6edf3', 'editorGutter.background': '#161b22', 'editorBracketHighlight.foreground1': '#79c0ff', 'editorBracketHighlight.foreground2': '#d2a8ff', 'editorBracketHighlight.foreground3': '#ff9bce' } });
+      monacoApi = m; done(m);
+    }, () => done(null));
+  });
+  const monacoTheme = () => root.dataset.theme === 'dark' ? 'zreview-dark' : 'zreview-light';
+  function mountEditors(f) {
+    editors.splice(0).forEach(ed => ed.dispose());
+    if (!monacoApi) return;
+    (f.entities || []).forEach((e, i) => {
+      const exs = e.examples?.length ? e.examples : e.example !== undefined ? [{ title: 'Example', value: e.example }] : [];
+      exs.forEach((x, j) => {
+        const host = main.querySelector(`.examples[data-entity="${i}"] .ex[data-ex="${j}"] .editor`);
+        if (!host) return;
+        host.replaceChildren();
+        const ed = monacoApi.editor.create(host, {
+          value: exampleText(x), language: exampleLang(x), theme: monacoTheme(), readOnly: true, domReadOnly: true,
+          minimap: { enabled: false }, scrollBeyondLastLine: false, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, glyphMargin: false,
+          fontSize: 12, lineHeight: 19, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', renderLineHighlight: 'none', wordWrap: 'on',
+          scrollbar: { alwaysConsumeMouseWheel: false, verticalScrollbarSize: 8 }, overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
+          bracketPairColorization: { enabled: true }, guides: { bracketPairs: true, indentation: true }, padding: { top: 10, bottom: 10 }, automaticLayout: true,
+        });
+        const fit = () => { host.style.height = `${Math.min(ed.getContentHeight(), 560)}px`; ed.layout(); };
+        ed.onDidContentSizeChange(fit); fit();
+        editors.push(ed);
+      });
+    });
   }
 
   function fileBlock(f, file) {
@@ -221,7 +281,14 @@
       e.stopPropagation(); const cs = entry(f.id).comments; cs.splice(cs.findIndex(c => c.id === b.dataset.del), 1); save(); render();
     });
 
+    main.querySelectorAll('.examples .tabs button').forEach(b => b.onclick = () => {
+      const box = b.closest('.examples');
+      box.querySelectorAll('.tabs button').forEach(t => t.classList.toggle('on', t === b));
+      box.querySelectorAll('.ex').forEach(x => x.hidden = x.dataset.ex !== b.dataset.ex);
+      editors.forEach(ed => ed.layout());
+    });
     highlight(f);
+    monacoReady.then(() => { if (data.features.find(x => x.id === current) === f) mountEditors(f); });
     if ((f.diagrams || []).length) {
       try { await mermaid.run({ nodes: main.querySelectorAll('pre.mermaid') }); }
       catch (e) { main.querySelectorAll('pre.mermaid').forEach(p => p.insertAdjacentHTML('afterend', `<p class="none">Diagram failed to render: ${esc(e.message)}</p>`)); }
