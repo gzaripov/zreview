@@ -176,10 +176,11 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
   removes. Each has `fields` (what it consists of) and `operations` (what you
   can do with it); every part carries a `meaning` and, where it matters, a
   `why`. `renamed` entities carry `from`. `examples` are serialized
-  instances, shown beside the fields in a read-only editor with a tab per
-  case: a default that fills most fields first, then edge cases, each with a
-  `title` and an optional `note` (and `lang` for a string value that is not
-  JSON). A single `example` still works. A grep can list every struct in a
+  instances, **required** on every entity and shown beside the fields in a
+  read-only editor with a tab per case: a default that fills most fields
+  first, then edge cases, each with a `title` and an optional `note` (and
+  `lang` for a string value that is not JSON). An entity without one is exit
+  `2` naming it. A single `example` satisfies the rule too. A grep can list every struct in a
   diff; it cannot tell a domain entity from `CodingKeys`, so this is authored
   judgment:
 

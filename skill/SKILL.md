@@ -71,8 +71,10 @@ removes. Each has `fields` (what it consists of) and `operations` (what you can
 do with it); every part carries a `meaning` and, where it matters, a `why`. The
 reasoning is the point — `kind: Kind` tells a reviewer nothing, *"a word list,
 or a lesson that adds theory on top; the wire value stays `spinoff` so shipped
-packs keep decoding"* tells them everything. Add `examples`: serialized
-instances, each with a `title`, an optional one-line `note`, and the `value`.
+packs keep decoding"* tells them everything. Every entity needs `examples`:
+serialized instances, each with a `title`, an optional one-line `note`, and
+the `value`. Omitting them is exit `2` naming the entity — an entity nobody
+showed an instance of is a declaration, not a domain type.
 The first is the default: an instance that fills most of the fields, the one
 a reviewer pictures when they read the type. Then two or three cases that
 exercise the edges — the minimal valid instance, a boundary (a maximum

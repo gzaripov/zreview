@@ -25,7 +25,8 @@ export type Entity = {
   fields?: Part[]; operations?: Part[];
   /** A serialized instance. An object is pretty-printed as JSON; a string is shown verbatim. Kept for old review.json files; prefer `examples`. */
   example?: unknown;
-  /** Serialized instances: a default that covers most fields first, then edge cases. Shown as tabs in a read-only editor. */
+  /** Serialized instances: a default that covers most fields first, then edge cases. Shown as tabs in a read-only editor.
+   *  Required — an entity nobody showed an instance of is a declaration, not a domain type. `example` satisfies it too; loadReview enforces this. */
   examples?: { title: string; note?: string; lang?: string; value: unknown }[];
 };
 export type Feature = {
@@ -116,11 +117,26 @@ export async function loadReview(path: string): Promise<Review> {
   for (const key of ["repo", "number", "url", "title", "base", "head"] as const) {
     if (!(key in (review.pr ?? {}))) throw new ReviewError(`${path}: pr.${key} is required`);
   }
+  const problems: string[] = [];
   for (const f of review.features ?? []) {
     for (const key of ["id", "title", "scenario", "description"] as const) {
       if (!(key in f)) throw new ReviewError(`${path}: feature ${f.id ?? "?"} lacks ${key}`);
     }
+    for (const e of f.entities ?? []) {
+      const where = `feature ${f.id} entity ${e.name ?? "?"}`;
+      // An entity with no instance is a declaration, not a domain type: the reviewer cannot picture what it holds.
+      if (!e.examples?.length && e.example === undefined) {
+        problems.push(`${where}: needs examples — a default filling most fields, then the edge cases worth looking at`);
+        continue;
+      }
+      (e.examples ?? []).forEach((x, i) => {
+        if (!x || typeof x !== "object") problems.push(`${where} example ${i + 1}: must be an object with a title and a value`);
+        else if (!x.title) problems.push(`${where} example ${i + 1}: needs a title naming the case it shows`);
+        else if (!("value" in x)) problems.push(`${where} example ${x.title}: needs a value, the serialized instance`);
+      });
+    }
   }
+  if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} with entity examples:\n  ${problems.join("\n  ")}`);
   return review;
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
