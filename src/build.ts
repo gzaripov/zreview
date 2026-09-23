@@ -41,7 +41,7 @@ export type Review = {
   pr: { repo: string; number: number; url: string; title: string; base: string; head: string; exposure?: string };
   features: Feature[];
 };
-export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string; state?: Record<string, unknown> | null };
+export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string };
 
 /** Parse a unified diff (git / `gh pr diff`) into per-file hunks with old and new line numbers. */
 export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
@@ -174,7 +174,9 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     .replace("__TITLE__", `Review: ${review.pr.repo}#${review.pr.number}`)
     .replace("__STYLE__", () => style)
     .replace("__SERVED__", String(opts.served))
-    .replace("__STATE__", () => JSON.stringify(opts.state ?? null).replaceAll("</", "<\\/"))
+    // A served page keeps the token: serve() fills in the state it holds on every request, so a reload
+    // shows what the reviewer has done rather than what existed when the process started.
+    .replace("__STATE__", () => (opts.served ? "__STATE__" : "null"))
     .replace("__REVIEW_JSON__", () => payload)
     .replace("__APP__", () => app);
   return { html, review, log };

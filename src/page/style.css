@@ -13,6 +13,7 @@
 }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* a display rule on a hidden element otherwise wins */
 body { margin: 0; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }
 a { color: var(--accent); }
 code, pre, .dl { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
@@ -76,7 +77,6 @@ figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .zoom .close:hover { border-color: var(--accent); }
 .zoom .body { flex: 1; min-height: 0; padding: 24px; display: flex; align-items: center; justify-content: center; overflow: auto; }
 .zoom .body svg { width: 100%; height: 100%; max-width: none !important; }
-.zoom[hidden] { display: none; }
 body.zoomed { overflow: hidden; }
 .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .shots figure { border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--panel); }

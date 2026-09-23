@@ -80,9 +80,10 @@ and the page degrades to file links.
 - **Approve** or **Request changes** per feature, with a note.
 - **Theme** — the ☾/☀ button in the sidebar switches light and dark; the
   page starts on your OS setting and remembers the switch.
-- **Submit review** returns the decision to the process. Close the tab
-  instead and it returns `dismissed`. **Copy review summary** and **Export
-  decisions.json** work with or without a server.
+- **Submit review** returns the decision to the process, and is the only
+  thing that ends it. Reloading or closing the tab does not: every change is
+  already on disk, so re-run and carry on where you were. **Copy review
+  summary** and **Export decisions.json** work with or without a server.
 
 Decisions, notes, comments and viewed files persist across runs in
 `~/.local/state/zreview/<repo>#<number>.json` (or `$XDG_STATE_HOME`, or
@@ -102,7 +103,7 @@ stdout is the whole interface.
 | `approved` | every feature approved, then Submit | the Markdown summary |
 | `changes` | any feature sent back, then Submit | the Markdown summary |
 | `incomplete` | Submit with features still open | the Markdown summary |
-| `dismissed` | tab closed, or `--timeout` elapsed | nothing |
+| `dismissed` | no Submit before `--timeout` (6 h) | nothing |
 
 With `--json`, one record. Each feature carries its decision, note, and
 comments — `line` comments name a file, side and line; `text` comments carry
@@ -140,7 +141,7 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 --diff <file>           unified diff to show; default is `gh pr diff <number>`
 --no-open               do not launch a browser (prints the URL on stderr)
 --port <n>              fixed port instead of random
---timeout <seconds>     give up as dismissed
+--timeout <seconds>     wait this long for a Submit, default 21600 (6 h); 0 waits forever
 --fresh                 ignore the saved state for this PR
 --max-width <px>        screenshot width cap, default 1200
 --quality <n>           JPEG quality, default 82

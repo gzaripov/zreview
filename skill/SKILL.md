@@ -116,7 +116,9 @@ zreview review review.json --json --result-file decision.json
 
 `zreview review` fetches the PR's diff through `gh pr diff` (or takes
 `--diff <file>`), opens the page, and **blocks**. Run it with a long or no
-timeout, or in the background, and read stdout when it returns. The
+timeout, or in the background, and read stdout when it returns. Only Submit
+ends it; a reload or a closed tab does not, so never re-run because the page
+went away. The
 reviewer's decisions, comments and viewed files persist per PR across runs,
 so after you address `changes` and push, re-run the same way and they resume
 where they were; pass `--fresh` only if they ask to start over.
@@ -126,7 +128,7 @@ where they were; pass `--fresh` only if they ask to start over.
 | `approved` | every feature approved |
 | `changes` | at least one sent back; `features[id].note` and `comments` say why |
 | `incomplete` | submitted with features still open |
-| `dismissed` | tab closed or `--timeout` elapsed; nothing to act on |
+| `dismissed` | no Submit within `--timeout`, 6 h by default; whatever was decided comes back, so check `features` before treating it as nothing |
 
 `--require-approval` makes the exit code carry it: `0` approved, `1`
 otherwise. Exit `2` means zreview could not run — it names the bad field or

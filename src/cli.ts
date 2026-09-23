@@ -29,7 +29,10 @@ const USAGE = `zreview — review a pull request one feature at a time
 
   both: [--max-width <px>] [--quality <n>] [--no-reencode]
 
-review  serves the page, opens it, blocks until you decide, prints the decision
+review  serves the page, opens it, blocks until Submit, prints the decision
+        Submit is the only thing that ends it: reloading or closing the tab does
+        not, because the state is on disk — re-run and carry on. With no Submit
+        it waits 6 h, then returns what was decided. --timeout 0 waits forever.
         decisions, comments and viewed files persist per PR under ~/.local/state/zreview;
         --fresh starts over
 build   writes a self-contained review.html and exits
@@ -90,7 +93,7 @@ const { values: opt, positionals } = parseArgs({
     "result-file": { type: "string" },
     "no-open": { type: "boolean", default: false },
     port: { type: "string", default: "0" },
-    timeout: { type: "string" },
+    timeout: { type: "string", default: "21600" },
     "max-width": { type: "string", default: "1200" },
     quality: { type: "string", default: "82" },
     "no-reencode": { type: "boolean", default: false },
@@ -111,7 +114,6 @@ try {
     quality: Number(opt.quality),
     served: command === "review",
     diffText: await loadDiff(opt.diff, pr.repo, pr.number),
-    state,
   });
 
   if (command === "build") {
@@ -126,12 +128,13 @@ try {
   const outcome = await serve(built.html, built.review, {
     port: Number(opt.port),
     open: !opt["no-open"],
-    timeoutSeconds: opt.timeout ? Number(opt.timeout) : undefined,
+    timeoutSeconds: Number(opt.timeout) || undefined,      // --timeout 0 waits forever
     persist: true,
+    initialState: state,
   });
 
   if (opt.json) console.log(JSON.stringify(outcome));
-  else if (outcome.decision === "dismissed") console.error("zreview: dismissed without a decision");
+  else if (outcome.decision === "dismissed") console.error("zreview: no review submitted");
   else console.log(outcome.summary);
 
   const written = opt["result-file"] ? await writeResult(opt["result-file"], outcome) : true;

@@ -392,12 +392,18 @@
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `decisions-${data.pr.number}.json` }); a.click();
   };
   document.getElementById('submit').onclick = async (e) => {
-    e.target.disabled = true;
-    const r = await fetch('/api/decision', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ features: state, summary: summary() }) });
-    if (!r.ok) { e.target.disabled = false; return; }
-    submitted = true; e.target.hidden = true; document.getElementById('submitted').hidden = false; render();
+    const btn = e.target;
+    btn.disabled = true; btn.textContent = 'Submitting…';
+    try {
+      const r = await fetch('/api/decision', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ features: state, summary: summary() }) });
+      if (!r.ok) throw new Error(`the server answered ${r.status}`);
+    } catch {
+      // The run may have timed out or been stopped. Nothing is lost: the state is on disk.
+      btn.disabled = false; btn.textContent = 'Submit review (could not reach zreview — try again)';
+      return;
+    }
+    submitted = true; btn.hidden = true; document.getElementById('submitted').hidden = false; render();
   };
-  addEventListener('pagehide', () => { if (SERVED && !submitted) navigator.sendBeacon('/api/dismiss'); });
   addEventListener('hashchange', () => { current = location.hash.slice(1) || current; render(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeZoom(); closeComposer(); } });
   render();
