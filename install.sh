@@ -36,3 +36,4 @@ for link in "${LINKS[@]}"; do
 done
 
 zreview --help | head -1
+command -v zplan >/dev/null && echo "also linked: zplan (plan review)"

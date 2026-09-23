@@ -47,11 +47,29 @@ the head, split the diff into features, write `review.json`, run `zreview
 review`, wait, act on what comes back. The agent does the analysis; zreview
 renders it and collects your decision.
 
+### Reviewing the plan first
+
+Before the code exists, the same page reviews what you intend to ship. Write
+the features with their scenario, what each will change, the entities and the
+diagrams, `tested` as the test plan, and no `files`:
+
+```bash
+zplan plan.json          # or: zreview plan plan.json
+```
+
+A plan needs only `pr.repo` and `pr.title` — there is no branch yet. Give the
+file an `id` and keep it: the decisions made on the plan follow the PR that
+implements it. When the code is written, add the files and the real `pr`
+fields, drop `"plan": true`, and run `zreview review`. The reviewer sees which
+parts of the spec you reworked since they approved the plan, and the files as
+newly arrived.
+
 ### By hand
 
 Write `review.json` (schema below), then:
 
 ```bash
+zplan  plan.json                             # the plan, before any code exists
 zreview review review.json                   # opens the page, blocks, prints the summary
 zreview review review.json --json            # one JSON record instead
 zreview build  review.json -o review.html    # static page, no server, nothing to wait for

@@ -107,7 +107,22 @@ produced it.
 covered. If nothing ran, say so and name what a reviewer should run. Never
 hoist every result under one feature; the reviewer approves features.
 
-## 3. Review
+## 3. Review the plan first, when there is one to review
+
+For work worth agreeing on before writing it, the same page reviews the plan.
+Write `review.json` with `"plan": true`, an `id` you will keep, `pr.repo` and
+`pr.title` only, and features carrying the scenario, what each will change,
+the entities it will add, the diagrams and `tested` as the test plan — and no
+`files`, because nothing is written. Run `zplan plan.json`. On `changes`,
+rework the plan and run it again. On `approved`, build it.
+
+Then review the code: add each feature's files and the real `pr` fields, drop
+`"plan": true`, and run `zreview review` with the same `id`. The reviewer
+keeps their plan decisions and sees what you reworked in the spec since, so
+keep the features and their ids stable — a renamed id reads as a feature they
+never agreed to.
+
+## 4. Review the code
 
 Work in a scratch directory outside the repository — the page carries base64
 images and does not belong in a working tree.
@@ -146,7 +161,7 @@ Open the page yourself once before handing it over and walk every feature:
 diagrams rendered, screenshots load, file links resolve, entities read as
 prose rather than declarations.
 
-## 4. Act on the decision
+## 5. Act on the decision
 
 `changes` — each sent-back feature's note and comments are the reviewer's ask.
 Address them in the same conversation; do not re-litigate a verdict. A `line`

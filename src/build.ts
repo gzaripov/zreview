@@ -38,10 +38,17 @@ export type Feature = {
   tested?: string;
 };
 export type Review = {
-  pr: { repo: string; number: number; url: string; title: string; base: string; head: string; exposure?: string };
+  /** Names this review's state across runs. Set it on the plan and keep it, and the decisions made on the
+   *  plan follow the PR that implements it. Without one the key is the PR number, or the title while there
+   *  is no number — which breaks the moment the title is reworded. */
+  id?: string;
+  /** A plan review: the features are what will be shipped, and no code exists yet. Features carry no files,
+   *  and `pr.number`, `pr.url` and `pr.head` may be missing because the branch is not there either. */
+  plan?: boolean;
+  pr: { repo: string; number?: number; url?: string; title: string; base?: string; head?: string; exposure?: string };
   features: Feature[];
 };
-export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string };
+export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean };
 
 /** Parse a unified diff (git / `gh pr diff`) into per-file hunks with old and new line numbers. */
 export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
@@ -109,18 +116,24 @@ async function dataUri(rel: string, base: string, opts: BuildOptions, log: strin
 const fileLink = (pr: Review["pr"], path: string) =>
   ({ path, url: `${pr.url}/files#diff-${createHash("sha256").update(path).digest("hex")}` });
 
-export async function loadReview(path: string): Promise<Review> {
+export async function loadReview(path: string, forcePlan = false): Promise<Review> {
   const file = Bun.file(path);
   if (!(await file.exists())) throw new ReviewError(`not found: ${path}`);
   let review: Review;
   try { review = await file.json(); } catch (e) { throw new ReviewError(`${path}: not valid JSON (${(e as Error).message})`); }
-  for (const key of ["repo", "number", "url", "title", "base", "head"] as const) {
-    if (!(key in (review.pr ?? {}))) throw new ReviewError(`${path}: pr.${key} is required`);
+  if (forcePlan) review.plan = true;               // `zreview plan` / `zplan`, whatever the file says
+  // A plan has no branch to name, so it needs only somewhere to put it and something to call it.
+  const required = review.plan ? (["repo", "title"] as const) : (["repo", "number", "url", "title", "base", "head"] as const);
+  for (const key of required) {
+    if (!(key in (review.pr ?? {}))) throw new ReviewError(`${path}: pr.${key} is required${review.plan ? " even in a plan" : ""}`);
   }
   const problems: string[] = [];
   for (const f of review.features ?? []) {
     for (const key of ["id", "title", "scenario", "description"] as const) {
       if (!(key in f)) throw new ReviewError(`${path}: feature ${f.id ?? "?"} lacks ${key}`);
+    }
+    if (review.plan && (f.files ?? []).length) {
+      problems.push(`feature ${f.id}: a plan lists no files — use \`zreview review\` (and drop "plan": true) now that the code exists`);
     }
     for (const e of f.entities ?? []) {
       const where = `feature ${f.id} entity ${e.name ?? "?"}`;
@@ -136,11 +149,11 @@ export async function loadReview(path: string): Promise<Review> {
       });
     }
   }
-  if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} with entity examples:\n  ${problems.join("\n  ")}`);
+  if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} in the features:\n  ${problems.join("\n  ")}`);
   return review;
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
-  const review = await loadReview(reviewPath);
+  const review = await loadReview(reviewPath, opts.plan);
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;

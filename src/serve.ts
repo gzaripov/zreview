@@ -56,7 +56,7 @@ export function serve(html: string, review: Review, opts: ServeOptions): Promise
       }
       if (req.method === "POST" && pathname === "/api/state") {
         latest = (await req.json()) as ReviewState;
-        if (opts.persist) await saveState(review.pr, latest).catch((e) => console.error(`zreview: could not save state: ${(e as Error).message}`));
+        if (opts.persist) await saveState(review, latest).catch((e) => console.error(`zreview: could not save state: ${(e as Error).message}`));
         return Response.json({ ok: true });
       }
       if (req.method === "POST" && pathname === "/api/decision") {

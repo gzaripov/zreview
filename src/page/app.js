@@ -41,10 +41,13 @@
   const main = document.getElementById('main');
 
   document.getElementById('pr-title').textContent = data.pr.title;
-  document.getElementById('pr-meta').innerHTML =
-    `<a href="${esc(data.pr.url)}">${esc(data.pr.repo)}#${data.pr.number}</a> · <code>${esc(data.pr.head)}</code> → ${esc(data.pr.base)}`;
+  const PLAN = !!data.plan;
+  document.getElementById('pr-meta').innerHTML = PLAN
+    ? `<span class="planchip">Plan</span> ${esc(data.pr.repo)} · not built yet`
+    : `<a href="${esc(data.pr.url)}">${esc(data.pr.repo)}#${data.pr.number}</a> · <code>${esc(data.pr.head)}</code> → ${esc(data.pr.base)}`;
   document.getElementById('pr-exposure').textContent = data.pr.exposure || '';
   if (SERVED) document.getElementById('submit').hidden = false;
+  if (PLAN) document.getElementById('submit').textContent = 'Submit plan review';
 
   // ---- sidebar
   function renderNav() {
@@ -77,7 +80,7 @@
   const textOf = (f) => ({ scenario: f.scenario || '', description: f.description || '', tested: f.tested || '' });
   const entityShots = (f) => Object.fromEntries((f.entities || []).map(e => [e.name, hashStr(JSON.stringify(e))]));
   const shot = (f) => ({
-    at: Date.now(), head: data.pr.head, text: textOf(f), entities: entityShots(f),
+    at: Date.now(), head: data.pr.head || 'plan', text: textOf(f), entities: entityShots(f),
     diagrams: hashStr(JSON.stringify(f.diagrams || [])),
     files: Object.fromEntries((f.files || []).map(file => [file.path, fileShot(file)])),
   });
@@ -89,7 +92,7 @@
     if (on) {
       v[file.path] = fhash(file);
       // Viewing one file is a look at that file, so only its snapshot moves forward.
-      const s = e.seen ||= { at: Date.now(), head: data.pr.head, files: {} };
+      const s = e.seen ||= { at: Date.now(), head: data.pr.head || 'plan', files: {} };
       (s.files ||= {})[file.path] = fileShot(file);
     } else delete v[file.path];
     if (on) expanded[f.id]?.delete(file.path);      // like GitHub: a viewed file folds
@@ -119,6 +122,8 @@
       if (s.entities[name] !== undefined && s.entities[name] !== h) { out.entities.add(name); out.any = true; }
     }
     if (s.diagrams !== undefined && s.diagrams !== hashStr(JSON.stringify(f.diagrams || []))) { out.diagrams = true; out.any = true; }
+    out.newFiles = s.files ? (f.files || []).filter(x => !(x.path in s.files)).map(x => x.path) : [];
+    if (out.newFiles.length) out.any = true;
     for (const file of f.files || []) {
       const was = s.files?.[file.path];
       if (!was || was.h === fhash(file)) continue;
@@ -327,7 +332,8 @@
       ...['scenario', 'description', 'tested'].filter(k => k in ch.text).map(k => ({ scenario: 'the scenario', description: 'what changed', tested: 'how it was tested' })[k]),
       ...(ch.diagrams ? ['the diagrams'] : []),
       ...(ch.entities.size ? [`${ch.entities.size} entit${ch.entities.size === 1 ? 'y' : 'ies'}`] : []),
-      ...(upd.length ? [`${upd.length} file${upd.length === 1 ? '' : 's'}`] : []),
+      ...(upd.length ? [`${upd.length} reworked file${upd.length === 1 ? '' : 's'}`] : []),
+      ...(ch.newFiles?.length ? [`${ch.newFiles.length} file${ch.newFiles.length === 1 ? '' : 's'} not there before`] : []),
     ];
     const bar = ch.any ? `<div class="since">
       <span class="what"><b>Reworked since you looked${when ? ` on ${esc(when)}` : ''}:</b> ${esc(bits.join(', '))}</span>
@@ -337,7 +343,7 @@
     const prose = (k, html) => showDiff && k in ch.text ? diffHtml(ch.text[k], textOf(f)[k]) : html;
     const chip = (k) => k in ch.text || (k === 'diagrams' && ch.diagrams) ? `<span class="sub upd">updated</span>` : '';
     const decidedAt = !st.decision ? 'No decision yet'
-      : `Decided ${new Date(st.at).toLocaleString()}${st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}${upd.length ? `. <b>${upd.length} file${upd.length === 1 ? '' : 's'} changed since</b>, decide again.` : ''}`;
+      : `Decided ${new Date(st.at).toLocaleString()}${st.head === 'plan' && !PLAN ? ' on the plan' : st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}${upd.length ? `. <b>${upd.length} file${upd.length === 1 ? '' : 's'} changed since</b>, decide again.` : ''}`;
 
     main.innerHTML = `
       <h2>${esc(f.title)}</h2>
@@ -347,20 +353,20 @@
       <div class="section"><h3>Entities</h3>${entities(f)}</div>
       <div class="section"><h3>Architecture${chip('diagrams')}</h3>${diagrams}</div>
       <div class="section"><h3>Before / after</h3>${shots(f.screenshots)}</div>
-      <div class="section"><h3>Diff${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}${v.total ? `<button class="focusbtn" type="button">Focus review ⛶</button>` : ''}</h3>${files || '<p class="none">No files listed.</p>'}</div>
-      <div class="section"><h3>How it was tested${chip('tested')}</h3><div class="prose commentable" data-section="tested">${prose('tested', md(f.tested) || '<p class="none">Not stated.</p>')}</div></div>
+      <div class="section"><h3>${PLAN ? 'Files' : 'Diff'}${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}${v.total ? `<button class="focusbtn" type="button">Focus review ⛶</button>` : ''}</h3>${files || `<p class="none">${PLAN ? 'Not written yet. The plan above is what you are approving.' : 'No files listed.'}</p>`}</div>
+      <div class="section"><h3>How it ${PLAN ? 'will be' : 'was'} tested${chip('tested')}</h3><div class="prose commentable" data-section="tested">${prose('tested', md(f.tested) || '<p class="none">Not stated.</p>')}</div></div>
       <div class="section"><h3>Comments</h3>${commentList(f)}</div>
       <div class="decide">
         <div class="row">
-          <button class="approve ${st.decision === 'approved' ? 'on' : ''}" ${dis}>Approve</button>
+          <button class="approve ${st.decision === 'approved' ? 'on' : ''}" ${dis}>${PLAN ? 'Approve plan' : 'Approve'}</button>
           <button class="changes ${st.decision === 'changes' ? 'on' : ''}" ${dis}>Request changes</button>
           <span class="state">${decidedAt}</span>
         </div>
-        <textarea placeholder="Note for the author (optional)" ${dis}>${esc(st.note || '')}</textarea>
+        <textarea placeholder="${PLAN ? 'What the plan should do differently (optional)' : 'Note for the author (optional)'}" ${dis}>${esc(st.note || '')}</textarea>
       </div>`;
 
     const decide = (decision) => {
-      Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head, seen: shot(f) });
+      Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head || 'plan', seen: shot(f) });
       save(); render();
     };
     main.querySelector('.approve').onclick = () => decide('approved');
@@ -598,7 +604,7 @@
 
   // ---- output
   function summary() {
-    const lines = [`## Review of ${data.pr.repo}#${data.pr.number} at \`${data.pr.head}\``, ''];
+    const lines = [PLAN ? `## Plan review of ${data.pr.repo} — ${data.pr.title}` : `## Review of ${data.pr.repo}#${data.pr.number} at \`${data.pr.head}\``, ''];
     data.features.forEach((f, i) => {
       const s = state[f.id] || {};
       const mark = s.decision === 'approved' ? '✅ Approved' : s.decision === 'changes' ? '❌ Changes requested' : '⬜ Not reviewed';
