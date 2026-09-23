@@ -74,6 +74,15 @@ and the page degrades to file links.
   syntax-highlighted diff, and how it was tested.
 - **Viewed** — a checkbox on each file in the diff, as on GitHub. Checking
   it folds the file; the Diff heading counts them.
+- **Focus review** — the button in the Diff heading opens one file at a time,
+  full screen, starting at the first you have not viewed. The rail on the
+  left groups the feature's files in the order worth reading them: the domain
+  types the feature declares, then what stores them, the logic, the
+  interfaces it is reached through, the surface, and last the tests and
+  generated files. `→` `PgDn` and `←` `PgUp` move, `Enter` marks the file
+  viewed and goes on, `C` comments on the whole file, `Esc` returns. A
+  horizontal swipe works on a touchscreen. Clicking a diff line still
+  comments on that line.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.
@@ -107,7 +116,7 @@ stdout is the whole interface.
 
 With `--json`, one record. Each feature carries its decision, note, and
 comments — `line` comments name a file, side and line; `text` comments carry
-the quoted passage and its section:
+the quoted passage and its section; `file` comments carry just the path:
 
 ```json
 { "decision": "changes",
@@ -117,7 +126,9 @@ the quoted passage and its section:
                   { "kind": "line", "file": "src/importer.ts", "side": "new", "line": 41,
                     "body": "Confirm unescaped slashes in the digest is deliberate." },
                   { "kind": "text", "section": "scenario", "quote": "same pack twice",
-                    "body": "Byte-identical, or same UUID?" } ] } },
+                    "body": "Byte-identical, or same UUID?" },
+                  { "kind": "file", "file": "src/importer.ts",
+                    "body": "This whole path duplicates the exporter." } ] } },
   "summary": "## Review of owner/name#45 at `18b8bf5`\n\n1. …",
   "url": "http://127.0.0.1:65392/" }
 ```

@@ -37,6 +37,33 @@ __STYLE__
   <main id="main"></main>
 </div>
 <button id="selbtn" class="selbtn" hidden>Comment</button>
+<div id="focus" class="focus" hidden role="dialog" aria-label="Focus review">
+  <div class="rail">
+    <div class="rhead"><span class="rtitle"></span><span class="rcount"></span></div>
+    <div class="rlist"></div>
+    <div class="rkeys">
+      <div><kbd>→</kbd> <kbd>PgDn</kbd> next file</div>
+      <div><kbd>←</kbd> <kbd>PgUp</kbd> previous</div>
+      <div><kbd>Enter</kbd> looks good, next</div>
+      <div><kbd>C</kbd> comment on this file</div>
+      <div><kbd>Esc</kbd> back to the feature</div>
+    </div>
+  </div>
+  <div class="stage">
+    <div class="progress"><span></span></div>
+    <div class="bar">
+      <span class="pos"></span>
+      <span class="path"></span>
+      <span class="grow"></span>
+      <button class="prev" type="button" title="Previous file (←)">← Previous</button>
+      <button class="next" type="button" title="Next file (→)">Forward →</button>
+      <button class="good" type="button" title="Mark viewed and go on (Enter)">Looks good ✓</button>
+      <button class="say" type="button" title="Comment on this file (C)">Comment</button>
+      <button class="close" type="button" title="Close (Esc)" aria-label="Close">✕</button>
+    </div>
+    <div class="code"></div>
+  </div>
+</div>
 <div id="zoom" class="zoom" hidden role="dialog" aria-label="Diagram, full screen">
   <div class="bar"><span class="cap"></span><button class="close" type="button" title="Close (Esc)" aria-label="Close">✕</button></div>
   <div class="body"></div>

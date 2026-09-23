@@ -75,11 +75,11 @@
   const fingerprints = (f) => Object.fromEntries((f.files || []).map(file => [file.path, fhash(file)]));
   const isViewed = (f, file) => { const v = entry(f.id).viewed ||= {}; return file.path in v && v[file.path] === fhash(file); };
   const viewedCount = (f) => { const files = f.files || []; return { seen: files.filter(x => isViewed(f, x)).length, total: files.length }; };
-  function toggleViewed(f, file, on) {
+  function toggleViewed(f, file, on = !isViewed(f, file)) {
     const v = entry(f.id).viewed ||= {};
     on ? v[file.path] = fhash(file) : delete v[file.path];
     if (on) expanded[f.id]?.delete(file.path);      // like GitHub: a viewed file folds
-    save(); render();
+    save(); render(); renderFocus();
   }
   /** Paths whose hunks differ from what the current decision was made against. */
   function changedSince(f) {
@@ -226,7 +226,7 @@
     const cs = entry(f.id).comments;
     if (!cs.length) return `<p class="none">No comments on this feature.</p>`;
     return cs.map(c => `<div class="cm">
-      <div class="who"><span class="where">${c.kind === 'line' ? `${esc(c.file)}:${c.line} (${c.side})` : esc(c.section)}</span><button data-del="${c.id}">delete</button></div>
+      <div class="who"><span class="where">${c.kind === 'line' ? `${esc(c.file)}:${c.line} (${c.side})` : c.kind === 'file' ? esc(c.file) : esc(c.section)}</span><button data-del="${c.id}">delete</button></div>
       ${c.quote ? `<div class="quote">${esc(c.quote)}</div>` : ''}${esc(c.body)}</div>`).join('');
   }
 
@@ -254,7 +254,7 @@
       <div class="section"><h3>Entities</h3>${entities(f)}</div>
       <div class="section"><h3>Architecture</h3>${diagrams}</div>
       <div class="section"><h3>Before / after</h3>${shots(f.screenshots)}</div>
-      <div class="section"><h3>Diff${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}</h3>${files || '<p class="none">No files listed.</p>'}</div>
+      <div class="section"><h3>Diff${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}${v.total ? `<button class="focusbtn" type="button">Focus review ⛶</button>` : ''}</h3>${files || '<p class="none">No files listed.</p>'}</div>
       <div class="section"><h3>How it was tested</h3><div class="prose commentable" data-section="tested">${md(f.tested) || '<p class="none">Not stated.</p>'}</div></div>
       <div class="section"><h3>Comments</h3>${commentList(f)}</div>
       <div class="decide">
@@ -275,6 +275,7 @@
       const p = h.parentElement.dataset.path; const set = (expanded[f.id] ||= new Set());
       set.has(p) ? set.delete(p) : set.add(p); render();
     });
+    main.querySelector('.focusbtn') && (main.querySelector('.focusbtn').onclick = () => openFocus(f));
     main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, f.files.find(x => x.path === cb.closest('.file').dataset.path), cb.checked));
     main.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row); });
     main.querySelectorAll('[data-del]').forEach(b => b.onclick = (e) => {
@@ -316,6 +317,125 @@
   zoom.querySelector('.close').onclick = closeZoom;
   zoom.onclick = (e) => { if (e.target === zoom) closeZoom(); };
 
+  // ---- reading order: what a reviewer should meet first. The domain types a feature declares come
+  // first (they name everything downstream), then what stores them, then the logic, the edges it is
+  // reached through, the surface, and last the tests and generated files that only confirm the rest.
+  const ORDER = [
+    ['domain', 'Domain types'], ['data', 'Persistence'], ['logic', 'Logic'],
+    ['edge', 'Interfaces'], ['ui', 'Surface'], ['test', 'Tests'], ['config', 'Config and generated'],
+  ];
+  const entityFiles = (f) => new Set((f.entities || []).map(e => e.file).filter(Boolean));
+  function groupOf(f, path) {
+    if (/(^|[\/._-])(tests?|specs?|__tests__|__mocks__|fixtures?|snapshots?)([\/._-]|$)/i.test(path)) return 'test';
+    if (/(^|\/)(package-lock|bun\.lock|yarn\.lock|pnpm-lock|go\.sum|cargo\.lock)|\.(lock|ya?ml|toml|ini|cfg|env)$|(^|\/)(dockerfile|makefile)/i.test(path)) return 'config';
+    if (entityFiles(f).has(path)) return 'domain';
+    if (/(^|[\/._-])(entit|model|schema|domain|dto|types?)([\/._-]|$)/i.test(path)) return 'domain';
+    if (/(^|[\/._-])(repositor|store|dao|database|db|migrations?|quer|sql|prisma|persist)/i.test(path)) return 'data';
+    if (/(^|[\/._-])(route|router|api|endpoint|controller|cli|command|serve|server|middleware)/i.test(path)) return 'edge';
+    if (/\.(css|scss|sass|less|html|svg|vue|svelte)$|(^|[\/._-])(component|view|page|screen|style|ui)/i.test(path)) return 'ui';
+    return 'logic';
+  }
+  /** The feature's files, grouped and flattened into the order the rail and the arrows follow. */
+  function reading(f) {
+    const files = f.files || [];
+    const groups = ORDER.map(([key, label]) => ({ key, label, files: files.filter(x => groupOf(f, x.path) === key) })).filter(g => g.files.length);
+    return { groups, flat: groups.flatMap(g => g.files) };
+  }
+
+  // ---- focus review: one file at a time, full screen, in that order
+  const focus = document.getElementById('focus');
+  let focusAt = -1;                                 // index into reading(current).flat, -1 when closed
+  const focusOpen = () => focusAt >= 0;
+  function openFocus(f, index) {
+    const { flat } = reading(f);
+    if (!flat.length) return;
+    const firstUnseen = flat.findIndex(x => !isViewed(f, x));
+    focusAt = index ?? (firstUnseen < 0 ? 0 : firstUnseen);
+    focus.hidden = false;
+    document.body.classList.add('zoomed');
+    renderFocus();
+  }
+  function closeFocus() {
+    if (!focusOpen()) return;
+    focusAt = -1; focus.hidden = true; focus.querySelector('.code').replaceChildren();
+    document.body.classList.remove('zoomed');
+    render();
+  }
+  function goFocus(step) {
+    const f = data.features.find(x => x.id === current);
+    const { flat } = reading(f);
+    const next = focusAt + step;
+    if (next < 0 || next >= flat.length) return closeFocus();   // off either end: back to the feature
+    focusAt = next; renderFocus();
+  }
+  function renderFocus() {
+    if (!focusOpen()) return;
+    const f = data.features.find(x => x.id === current);
+    const { groups, flat } = reading(f);
+    const file = flat[focusAt];
+    if (!file) return closeFocus();
+    const seen = flat.filter(x => isViewed(f, x)).length;
+    focus.querySelector('.rtitle').textContent = f.title;
+    focus.querySelector('.rcount').textContent = `${seen}/${flat.length} viewed`;
+    focus.querySelector('.progress span').style.width = `${Math.round((seen / flat.length) * 100)}%`;
+    focus.querySelector('.pos').textContent = `${focusAt + 1} of ${flat.length}`;
+    focus.querySelector('.path').textContent = file.path;
+    focus.querySelector('.good').textContent = isViewed(f, file) ? 'Viewed ✓' : 'Looks good ✓';
+    focus.querySelector('.good').classList.toggle('on', isViewed(f, file));
+
+    const rail = focus.querySelector('.rlist');
+    rail.innerHTML = groups.map(g => `<div class="rgroup"><div class="glabel">${esc(g.label)}</div>${g.files.map(x => {
+      const i = flat.indexOf(x), dir = x.path.slice(0, x.path.lastIndexOf('/') + 1), name = x.path.slice(dir.length);
+      const n = entry(f.id).comments.filter(c => (c.kind === 'line' || c.kind === 'file') && c.file === x.path).length;
+      return `<button data-i="${i}" class="${i === focusAt ? 'on' : ''} ${isViewed(f, x) ? 'seen' : ''}">
+        <span class="tick">${isViewed(f, x) ? '✓' : ''}</span><span class="nm"><span class="dir">${esc(dir)}</span>${esc(name)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}</button>`;
+    }).join('')}</div>`).join('');
+    rail.querySelectorAll('button').forEach(b => b.onclick = () => { focusAt = Number(b.dataset.i); renderFocus(); });
+    rail.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });
+
+    const code = focus.querySelector('.code');
+    const cs = entry(f.id).comments.filter(c => c.kind === 'file' && c.file === file.path);
+    code.innerHTML = `${cs.map(c => `<div class="lc"><div class="who">file comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('')}
+      <div class="file" data-path="${esc(file.path)}">${hunks(f, file)}</div>`;
+    code.scrollTop = 0;
+    code.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row, renderFocus); });
+    code.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      const list = entry(f.id).comments; list.splice(list.findIndex(c => c.id === b.dataset.del), 1); save(); renderFocus();
+    });
+  }
+  function markGood() {
+    const f = data.features.find(x => x.id === current);
+    const file = reading(f).flat[focusAt];
+    if (!file || submitted) return;
+    if (!isViewed(f, file)) toggleViewed(f, file);
+    goFocus(1);
+  }
+  function fileComposer() {
+    const f = data.features.find(x => x.id === current);
+    const file = reading(f).flat[focusAt];
+    if (!file || submitted) return;
+    const c = makeComposer(file.path, (body) => {
+      entry(f.id).comments.push({ id: uid(), kind: 'file', file: file.path, body, at: Date.now() });
+      save(); renderFocus();
+    }, 'float');
+    Object.assign(c.style, { left: '50%', top: '84px', transform: 'translateX(-50%)' });
+    focus.appendChild(c); c.querySelector('textarea').focus();
+  }
+  focus.querySelector('.close').onclick = closeFocus;
+  focus.querySelector('.prev').onclick = () => goFocus(-1);
+  focus.querySelector('.next').onclick = () => goFocus(1);
+  focus.querySelector('.good').onclick = markGood;
+  focus.querySelector('.say').onclick = fileComposer;
+  // Swipe on a touchpad or a phone: horizontal only, so scrolling the code is untouched.
+  let touch = null;
+  focus.querySelector('.code').addEventListener('touchstart', (e) => { touch = e.changedTouches[0]; }, { passive: true });
+  focus.querySelector('.code').addEventListener('touchend', (e) => {
+    if (!touch) return;
+    const dx = e.changedTouches[0].clientX - touch.clientX, dy = e.changedTouches[0].clientY - touch.clientY;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) goFocus(dx < 0 ? 1 : -1);
+    touch = null;
+  }, { passive: true });
+
   // ---- composers
   let composer = null;
   function closeComposer() { composer?.remove(); composer = null; document.getElementById('selbtn').hidden = true; }
@@ -328,9 +448,9 @@
     composer.querySelector('.save').onclick = () => { const body = composer.querySelector('textarea').value.trim(); if (body) onSave(body); closeComposer(); };
     return composer;
   }
-  function openLineComposer(f, row) {
+  function openLineComposer(f, row, redraw = render) {
     const file = row.closest('.file').dataset.path, side = row.dataset.side, line = Number(row.dataset.line);
-    const c = makeComposer(null, (body) => { entry(f.id).comments.push({ id: uid(), kind: 'line', file, side, line, body, at: Date.now() }); save(); render(); });
+    const c = makeComposer(null, (body) => { entry(f.id).comments.push({ id: uid(), kind: 'line', file, side, line, body, at: Date.now() }); save(); redraw(); });
     row.insertAdjacentElement('afterend', c);
     c.querySelector('textarea').focus();
   }
@@ -381,7 +501,9 @@
       lines.push(`${i + 1}. **${f.title}** — ${mark}`);
       if (s.note) lines.push(`   > ${s.note.replace(/\n/g, '\n   > ')}`);
       for (const c of s.comments || []) {
-        lines.push(c.kind === 'line' ? `   - \`${c.file}:${c.line}\` — ${c.body}` : `   - "${c.quote.length > 80 ? c.quote.slice(0, 77) + '…' : c.quote}" — ${c.body}`);
+        lines.push(c.kind === 'line' ? `   - \`${c.file}:${c.line}\` — ${c.body}`
+          : c.kind === 'file' ? `   - \`${c.file}\` — ${c.body}`
+          : `   - "${c.quote.length > 80 ? c.quote.slice(0, 77) + '…' : c.quote}" — ${c.body}`);
       }
     });
     return lines.join('\n');
@@ -405,6 +527,15 @@
     submitted = true; btn.hidden = true; document.getElementById('submitted').hidden = false; render();
   };
   addEventListener('hashchange', () => { current = location.hash.slice(1) || current; render(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeZoom(); closeComposer(); } });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { if (composer) return closeComposer(); closeZoom(); return closeFocus(); }
+    if (!focusOpen() || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    const key = e.key;
+    if (key === 'ArrowRight' || key === 'PageDown' || key === 'j') { e.preventDefault(); goFocus(1); }
+    else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'k') { e.preventDefault(); goFocus(-1); }
+    else if (key === 'Enter') { e.preventDefault(); markGood(); }
+    else if (key === 'c' || key === 'C') { e.preventDefault(); fileComposer(); }
+  });
   render();
 })();

@@ -95,7 +95,10 @@ harness before committing. `null` when there is no user-visible surface; the
 page prints the absence. The builder inlines the images, so nothing is uploaded.
 
 **`files`** — exactly as `gh pr diff --name-only` spells them, and every one
-of them: zreview compares the features' files to the diff and exits `2`
+of them. Focus review walks them grouped by path (domain types first, then
+persistence, logic, interfaces, surface, tests, generated), and an entity's
+`file` pins that path to the front, so give every entity the file it lives
+in: zreview compares the features' files to the diff and exits `2`
 naming any changed file no feature claims, or any listed path the PR does not
 change. A lockfile or generated file belongs to the feature whose change
 produced it.
@@ -143,7 +146,8 @@ prose rather than declarations.
 `changes` — each sent-back feature's note and comments are the reviewer's ask.
 Address them in the same conversation; do not re-litigate a verdict. A `line`
 comment names `file`, `side` and `line`; a `text` comment carries the quoted
-passage. `dismissed` — say so briefly and continue.
+passage. A `file` comment names a file and nothing else — it is about that
+file's change as a whole. `dismissed` — say so briefly and continue.
 
 The record's `summary` is the verdicts as Markdown. Neither zreview nor you
 post it anywhere unless asked. When asked, whose PR it is decides the command:
