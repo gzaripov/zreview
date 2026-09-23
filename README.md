@@ -114,6 +114,11 @@ stdout is the whole interface.
 | `incomplete` | Submit with features still open | the Markdown summary |
 | `dismissed` | no Submit before `--timeout` (6 h) | nothing |
 
+When the decision is `changes` or `incomplete`, zreview prints the command to
+run once the fixes are in. Re-running is how the rework goes back to the
+reviewer: the decisions and comments resume, and reworked files come back
+marked *updated* with their viewed marks cleared.
+
 With `--json`, one record. Each feature carries its decision, note, and
 comments — `line` comments name a file, side and line; `text` comments carry
 the quoted passage and its section; `file` comments carry just the path:

@@ -149,6 +149,15 @@ comment names `file`, `side` and `line`; a `text` comment carries the quoted
 passage. A `file` comment names a file and nothing else — it is about that
 file's change as a whole. `dismissed` — say so briefly and continue.
 
+**Then run `zreview review` again.** A review that came back `changes` or
+`incomplete` is not finished: the reviewer is waiting to see the rework, and
+re-running is the only way to hand it back. Push the fixes, refresh
+`review.json` for anything the fixes moved — new files, a changed diagram, an
+entity that gained a field — and re-run the same command. Decisions, comments
+and viewed marks resume, and the files you reworked come back marked
+`updated` with their viewed marks cleared, so the reviewer sees exactly what
+changed since they looked. Keep going until the decision is `approved`.
+
 The record's `summary` is the verdicts as Markdown. Neither zreview nor you
 post it anywhere unless asked. When asked, whose PR it is decides the command:
 your own → `gh pr comment <N> --body-file summary.md`, since GitHub refuses

@@ -137,6 +137,12 @@ try {
   else if (outcome.decision === "dismissed") console.error("zreview: no review submitted");
   else console.log(outcome.summary);
 
+  // The reviewer is waiting to see the rework, and re-running is the only way to hand it back.
+  if (outcome.decision === "changes" || outcome.decision === "incomplete") {
+    console.error(`zreview: make the fixes, then run this again to hand them back:\n  zreview review ${src}` +
+      `${opt.diff ? ` --diff ${opt.diff}` : ""}\nThe decisions and comments resume, and the files you reworked show as updated.`);
+  }
+
   const written = opt["result-file"] ? await writeResult(opt["result-file"], outcome) : true;
   if (!written) process.exit(2);
   process.exit(opt["require-approval"] && outcome.decision !== "approved" ? 1 : 0);
