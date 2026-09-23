@@ -24,11 +24,13 @@
   const key = `zreview:${data.pr.repo}#${data.pr.number}`;
   const load = () => { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; } };
   const save = () => {
+    forgetSince();
     localStorage.setItem(key, JSON.stringify(state));
     if (SERVED) fetch('/api/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(state), keepalive: true }).catch(() => {});
   };
   let state = SERVED ? (INITIAL_STATE || {}) : load();
   let submitted = false;
+  let showDiff = true;                         // prose blocks show the old wording struck through while they are stale
   let current = location.hash.slice(1) || (data.features[0] && data.features[0].id);
   const expanded = {};                         // featureId -> Set of file paths open in the diff
   const entry = (id) => (state[id] ||= { comments: [] }, state[id].comments ||= [], state[id]);
@@ -63,30 +65,101 @@
     document.getElementById('tally').textContent = `${a} approved · ${c} changes requested · ${total - a - c} open`;
   }
 
-  // ---- file fingerprints: a file is "the same" while its hunks are. A viewed mark and a decision both
-  // remember the fingerprints they were made against, so a reworked file comes back unviewed and a
-  // feature whose files were reworked after a decision shows as updated.
-  const fhash = (file) => {
-    if (!file.hunks) return null;
-    const s = JSON.stringify(file.hunks); let h = 0x811c9dc5;
-    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
-    return h.toString(16);
-  };
-  const fingerprints = (f) => Object.fromEntries((f.files || []).map(file => [file.path, fhash(file)]));
+  // ---- revisions: what the reviewer had in front of them last time. Taken when they decide on a
+  // feature and, per file, when they mark it viewed. Everything a reviewer reads is in it — the prose,
+  // the entities, the diagrams and the diff itself — so the next run can show what the author moved
+  // rather than only that something moved.
+  const LINE_CAP = 4000;                            // beyond this a file keeps its hash but not its lines
+  const hashStr = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
+  const fhash = (file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null;
+  const flatLines = (file) => file.hunks ? file.hunks.flatMap(h => h.lines.map(l => l.t + l.text)) : null;
+  const fileShot = (file) => { const lines = flatLines(file); return { h: fhash(file), lines: lines && lines.length <= LINE_CAP ? lines : null }; };
+  const textOf = (f) => ({ scenario: f.scenario || '', description: f.description || '', tested: f.tested || '' });
+  const entityShots = (f) => Object.fromEntries((f.entities || []).map(e => [e.name, hashStr(JSON.stringify(e))]));
+  const shot = (f) => ({
+    at: Date.now(), head: data.pr.head, text: textOf(f), entities: entityShots(f),
+    diagrams: hashStr(JSON.stringify(f.diagrams || [])),
+    files: Object.fromEntries((f.files || []).map(file => [file.path, fileShot(file)])),
+  });
+  const seenOf = (f) => entry(f.id).seen;
   const isViewed = (f, file) => { const v = entry(f.id).viewed ||= {}; return file.path in v && v[file.path] === fhash(file); };
   const viewedCount = (f) => { const files = f.files || []; return { seen: files.filter(x => isViewed(f, x)).length, total: files.length }; };
   function toggleViewed(f, file, on = !isViewed(f, file)) {
-    const v = entry(f.id).viewed ||= {};
-    on ? v[file.path] = fhash(file) : delete v[file.path];
+    const e = entry(f.id), v = e.viewed ||= {};
+    if (on) {
+      v[file.path] = fhash(file);
+      // Viewing one file is a look at that file, so only its snapshot moves forward.
+      const s = e.seen ||= { at: Date.now(), head: data.pr.head, files: {} };
+      (s.files ||= {})[file.path] = fileShot(file);
+    } else delete v[file.path];
     if (on) expanded[f.id]?.delete(file.path);      // like GitHub: a viewed file folds
     save(); render(); renderFocus();
   }
-  /** Paths whose hunks differ from what the current decision was made against. */
-  function changedSince(f) {
-    const st = state[f.id]; if (!st?.decision || !st.files) return [];
-    const now = fingerprints(f), then = st.files;
-    return [...new Set([...Object.keys(now), ...Object.keys(then)])].filter(p => now[p] !== then[p] && (now[p] ?? then[p]) !== null).sort();
+
+  /** Lines of `now` the reviewer has not seen. Order-insensitive, so code that only moved is not "new". */
+  function freshLines(now, before) {
+    if (!now) return null;
+    if (!before) return now.map(() => false);
+    const left = new Map();
+    for (const l of before) left.set(l, (left.get(l) || 0) + 1);
+    const fresh = now.map(l => { const n = left.get(l) || 0; if (n) { left.set(l, n - 1); return false; } return true; });
+    let gone = 0; for (const n of left.values()) gone += n;
+    fresh.gone = gone;
+    return fresh;
   }
+  /** Everything that moved since the reviewer's snapshot, keyed the way the panel needs it. */
+  function since(f) {
+    const s = seenOf(f);
+    const out = { any: false, at: s?.at, head: s?.head, text: {}, entities: new Set(), diagrams: false, files: {} };
+    if (!s) return out;
+    if (s.text) for (const k of ['scenario', 'description', 'tested']) {
+      if ((s.text[k] ?? '') !== (textOf(f)[k] ?? '')) { out.text[k] = s.text[k] ?? ''; out.any = true; }
+    }
+    if (s.entities) for (const [name, h] of Object.entries(entityShots(f))) {
+      if (s.entities[name] !== undefined && s.entities[name] !== h) { out.entities.add(name); out.any = true; }
+    }
+    if (s.diagrams !== undefined && s.diagrams !== hashStr(JSON.stringify(f.diagrams || []))) { out.diagrams = true; out.any = true; }
+    for (const file of f.files || []) {
+      const was = s.files?.[file.path];
+      if (!was || was.h === fhash(file)) continue;
+      const fresh = freshLines(flatLines(file), was.lines);
+      out.files[file.path] = { fresh, added: fresh ? fresh.filter(Boolean).length : null, gone: fresh ? fresh.gone : null };
+      out.any = true;
+    }
+    return out;
+  }
+  let sinceMemo = { id: null, val: null };
+  const sinceOf = (f) => (sinceMemo.id === f.id ? sinceMemo.val : (sinceMemo = { id: f.id, val: since(f) }).val);
+  const forgetSince = () => { sinceMemo = { id: null, val: null }; };
+  /** Paths whose hunks differ from what the reviewer last saw. */
+  const changedSince = (f) => Object.keys(sinceOf(f).files).sort();
+
+  // ---- word-level diff for the prose blocks, so "what changed" shows what changed
+  function wordDiff(before, after) {
+    const tok = (s) => s.split(/(\s+)/).filter(x => x !== '');
+    const a = tok(before), b = tok(after);
+    if (a.length + b.length > 2400) return null;               // too long to diff cheaply; show the text plain
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const out = []; let i = 0, j = 0;
+    const push = (kind, text) => { const last = out[out.length - 1]; last && last.kind === kind ? last.text += text : out.push({ kind, text }); };
+    while (i < m && j < n) {
+      if (a[i] === b[j]) { push('same', b[j]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i++]); }
+      else { push('ins', b[j++]); }
+    }
+    while (i < m) push('del', a[i++]);
+    while (j < n) push('ins', b[j++]);
+    return out;
+  }
+  const diffHtml = (before, after) => {
+    const parts = wordDiff(before, after);
+    if (!parts) return `<div class="wd plain">${esc(after)}</div>`;
+    return `<div class="wd">${parts.map(p => p.kind === 'same' ? esc(p.text)
+      : `<${p.kind === 'ins' ? 'ins' : 'del'}>${esc(p.text)}</${p.kind === 'ins' ? 'ins' : 'del'}>`).join('')}</div>`;
+  };
 
   // ---- blocks
   function shots(s) {
@@ -111,8 +184,9 @@
         ${exs.map((x, j) => `<div class="ex" data-ex="${j}" ${j ? 'hidden' : ''}>${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}<div class="editor"><pre><code>${esc(exampleText(x))}</code></pre></div></div>`).join('')}
       </div>`;
     };
-    return es.map((e, i) => `<div class="entity ${e.change} ${examplesOf(e).length ? 'with-examples' : ''}">
-      <div class="eh"><span class="chip ${e.change}">${e.change}</span><span class="ename">${esc(e.name)}</span>${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}${e.file ? `<span class="efile">${esc(e.file)}</span>` : ''}</div>
+    const moved = sinceOf(f).entities;
+    return es.map((e, i) => `<div class="entity ${e.change} ${examplesOf(e).length ? 'with-examples' : ''} ${moved.has(e.name) ? 'moved' : ''}">
+      <div class="eh"><span class="chip ${e.change}">${e.change}</span><span class="ename">${esc(e.name)}</span>${moved.has(e.name) ? `<span class="upd">reworked since you looked</span>` : ''}${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}${e.file ? `<span class="efile">${esc(e.file)}</span>` : ''}</div>
       <div class="ebody"><div class="etext">
         <div class="esum">${esc(e.summary)}${e.why ? `<div class="ewhy">${esc(e.why)}</div>` : ''}</div>
         ${parts('Consists of', e.fields, e.change)}${parts('What you can do', e.operations, e.change)}
@@ -169,10 +243,11 @@
   }
 
   function fileBlock(f, file) {
-    const open = expanded[f.id]?.has(file.path), seen = isViewed(f, file), upd = changedSince(f).includes(file.path);
+    const open = expanded[f.id]?.has(file.path), seen = isViewed(f, file), ch = sinceOf(f).files[file.path];
+    const upd = !!ch, chip = ch?.added != null ? `${ch.added} new line${ch.added === 1 ? '' : 's'}${ch.gone ? `, ${ch.gone} gone` : ''}` : 'updated since your last look';
     const stat = file.hunks ? `<span class="stat"><span class="a">+${file.add}</span> <span class="d">−${file.del}</span></span>` : '';
     return `<div class="file ${seen ? 'seen' : ''}" data-path="${esc(file.path)}">
-      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">updated since your decision</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
+      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
       ${open ? hunks(f, file) : ''}
     </div>`;
   }
@@ -207,6 +282,8 @@
     if (!file.hunks.length) return `<p class="none" style="padding:8px 12px">${file.status === 'binary' ? 'Binary file.' : 'No text changes.'}</p>`;
     const cs = entry(f.id).comments.filter(c => c.kind === 'line' && c.file === file.path);
     const lang = langOf(file.path);
+    const fresh = sinceOf(f).files[file.path]?.fresh;        // lines the reviewer has not seen
+    let fi = 0;
     return file.hunks.map(h => {
       const oh = hlLines(h.lines.filter(l => l.t !== '+').map(l => l.text).join('\n'), lang);
       const nh = hlLines(h.lines.filter(l => l.t !== '-').map(l => l.text).join('\n'), lang);
@@ -215,7 +292,8 @@
         const side = l.t === '-' ? 'old' : 'new', line = l.t === '-' ? l.old : l.new;
         const code = l.t === '-' ? oh[oi++] : l.t === '+' ? nh[ni++] : (oi++, nh[ni++]);
         const mine = cs.filter(c => c.side === side && c.line === line);
-        return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${mine.length ? 'has' : ''}" data-side="${side}" data-line="${line}">
+        const isNew = fresh?.[fi++];
+        return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${mine.length ? 'has' : ''} ${isNew ? 'fresh' : ''}" data-side="${side}" data-line="${line}" ${isNew ? 'title="New since your last look"' : ''}>
           <span class="g">${l.old ?? ''}</span><span class="g">${l.new ?? ''}</span><span class="code"><span class="sign">${l.t}</span>${code}</span></div>` +
           mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
       }).join('')}</div>`;
@@ -243,19 +321,34 @@
     const files = (f.files || []).map(file => fileBlock(f, file)).join('');
     const dis = submitted ? 'disabled' : '';
     const v = viewedCount(f);
-    const upd = changedSince(f);
+    const ch = sinceOf(f), upd = changedSince(f);
+    const when = ch.at ? new Date(ch.at).toLocaleString() : '';
+    const bits = [
+      ...['scenario', 'description', 'tested'].filter(k => k in ch.text).map(k => ({ scenario: 'the scenario', description: 'what changed', tested: 'how it was tested' })[k]),
+      ...(ch.diagrams ? ['the diagrams'] : []),
+      ...(ch.entities.size ? [`${ch.entities.size} entit${ch.entities.size === 1 ? 'y' : 'ies'}`] : []),
+      ...(upd.length ? [`${upd.length} file${upd.length === 1 ? '' : 's'}`] : []),
+    ];
+    const bar = ch.any ? `<div class="since">
+      <span class="what"><b>Reworked since you looked${when ? ` on ${esc(when)}` : ''}:</b> ${esc(bits.join(', '))}</span>
+      <label class="hl"><input type="checkbox" ${showDiff ? 'checked' : ''}>Show the old wording</label>
+      <button class="seen" type="button" title="Take everything on this page as your new starting point">Mark as seen</button>
+    </div>` : '';
+    const prose = (k, html) => showDiff && k in ch.text ? diffHtml(ch.text[k], textOf(f)[k]) : html;
+    const chip = (k) => k in ch.text || (k === 'diagrams' && ch.diagrams) ? `<span class="sub upd">updated</span>` : '';
     const decidedAt = !st.decision ? 'No decision yet'
       : `Decided ${new Date(st.at).toLocaleString()}${st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}${upd.length ? `. <b>${upd.length} file${upd.length === 1 ? '' : 's'} changed since</b>, decide again.` : ''}`;
 
     main.innerHTML = `
       <h2>${esc(f.title)}</h2>
-      <div class="section"><h3>User scenario</h3><div class="scenario commentable" data-section="scenario">${esc(f.scenario || '')}</div></div>
-      <div class="section"><h3>What changed</h3><div class="prose commentable" data-section="description">${md(f.description)}</div></div>
+      ${bar}
+      <div class="section"><h3>User scenario${chip('scenario')}</h3><div class="scenario commentable" data-section="scenario">${prose('scenario', esc(f.scenario || ''))}</div></div>
+      <div class="section"><h3>What changed${chip('description')}</h3><div class="prose commentable" data-section="description">${prose('description', md(f.description))}</div></div>
       <div class="section"><h3>Entities</h3>${entities(f)}</div>
-      <div class="section"><h3>Architecture</h3>${diagrams}</div>
+      <div class="section"><h3>Architecture${chip('diagrams')}</h3>${diagrams}</div>
       <div class="section"><h3>Before / after</h3>${shots(f.screenshots)}</div>
       <div class="section"><h3>Diff${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}${v.total ? `<button class="focusbtn" type="button">Focus review ⛶</button>` : ''}</h3>${files || '<p class="none">No files listed.</p>'}</div>
-      <div class="section"><h3>How it was tested</h3><div class="prose commentable" data-section="tested">${md(f.tested) || '<p class="none">Not stated.</p>'}</div></div>
+      <div class="section"><h3>How it was tested${chip('tested')}</h3><div class="prose commentable" data-section="tested">${prose('tested', md(f.tested) || '<p class="none">Not stated.</p>')}</div></div>
       <div class="section"><h3>Comments</h3>${commentList(f)}</div>
       <div class="decide">
         <div class="row">
@@ -266,7 +359,10 @@
         <textarea placeholder="Note for the author (optional)" ${dis}>${esc(st.note || '')}</textarea>
       </div>`;
 
-    const decide = (decision) => { Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head, files: fingerprints(f) }); save(); render(); };
+    const decide = (decision) => {
+      Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head, seen: shot(f) });
+      save(); render();
+    };
     main.querySelector('.approve').onclick = () => decide('approved');
     main.querySelector('.changes').onclick = () => decide('changes');
     main.querySelector('.decide textarea').onblur = (e) => { if (state[f.id]) { state[f.id].note = e.target.value; save(); } };
@@ -275,6 +371,10 @@
       const p = h.parentElement.dataset.path; const set = (expanded[f.id] ||= new Set());
       set.has(p) ? set.delete(p) : set.add(p); render();
     });
+    const hl = main.querySelector('.since .hl input');
+    if (hl) hl.onchange = () => { showDiff = hl.checked; render(); };
+    const seenBtn = main.querySelector('.since .seen');
+    if (seenBtn) seenBtn.onclick = () => { entry(f.id).seen = shot(f); save(); render(); };
     main.querySelector('.focusbtn') && (main.querySelector('.focusbtn').onclick = () => openFocus(f));
     main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, f.files.find(x => x.path === cb.closest('.file').dataset.path), cb.checked));
     main.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row); });
@@ -380,6 +480,9 @@
     focus.querySelector('.progress span').style.width = `${Math.round((seen / flat.length) * 100)}%`;
     focus.querySelector('.pos').textContent = `${focusAt + 1} of ${flat.length}`;
     focus.querySelector('.path').textContent = file.path;
+    const fch = sinceOf(f).files[file.path];
+    focus.querySelector('.newly').textContent = fch ? (fch.added != null ? `${fch.added} new line${fch.added === 1 ? '' : 's'} since you looked` : 'reworked since you looked') : '';
+    focus.querySelector('.newly').hidden = !fch;
     focus.querySelector('.good').textContent = isViewed(f, file) ? 'Viewed ✓' : 'Looks good ✓';
     focus.querySelector('.good').classList.toggle('on', isViewed(f, file));
 
@@ -387,8 +490,9 @@
     rail.innerHTML = groups.map(g => `<div class="rgroup"><div class="glabel">${esc(g.label)}</div>${g.files.map(x => {
       const i = flat.indexOf(x), dir = x.path.slice(0, x.path.lastIndexOf('/') + 1), name = x.path.slice(dir.length);
       const n = entry(f.id).comments.filter(c => (c.kind === 'line' || c.kind === 'file') && c.file === x.path).length;
+      const ch = sinceOf(f).files[x.path];
       return `<button data-i="${i}" class="${i === focusAt ? 'on' : ''} ${isViewed(f, x) ? 'seen' : ''}">
-        <span class="tick">${isViewed(f, x) ? '✓' : ''}</span><span class="nm"><span class="dir">${esc(dir)}</span>${esc(name)}</span>${n ? `<span class="c">${n} ✎</span>` : ''}</button>`;
+        <span class="tick">${isViewed(f, x) ? '✓' : ''}</span><span class="nm"><span class="dir">${esc(dir)}</span>${esc(name)}</span>${ch ? `<span class="u" title="${ch.added != null ? `${ch.added} new lines` : 'reworked'}">●</span>` : ''}${n ? `<span class="c">${n} ✎</span>` : ''}</button>`;
     }).join('')}</div>`).join('');
     rail.querySelectorAll('button').forEach(b => b.onclick = () => { focusAt = Number(b.dataset.i); renderFocus(); });
     rail.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });

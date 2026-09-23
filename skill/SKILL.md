@@ -124,7 +124,12 @@ ends it; a reload or a closed tab does not, so never re-run because the page
 went away. The
 reviewer's decisions, comments and viewed files persist per PR across runs,
 so after you address `changes` and push, re-run the same way and they resume
-where they were; pass `--fresh` only if they ask to start over.
+where they were; pass `--fresh` only if they ask to start over. The page
+holds the revision the reviewer last looked at and marks everything you moved
+since — the reworked prose word by word, the changed entities and diagrams,
+and the lines that are new to them — so rewrite `review.json` to match the
+fixes rather than leaving it stale. A scenario or description that no longer
+matches the code shows up as a reworked passage they have to read twice.
 
 | `decision` | Meaning |
 |---|---|

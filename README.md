@@ -97,10 +97,18 @@ and the page degrades to file links.
 Decisions, notes, comments and viewed files persist across runs in
 `~/.local/state/zreview/<repo>#<number>.json` (or `$XDG_STATE_HOME`, or
 `$ZREVIEW_STATE_DIR`), keyed on the PR rather than the head, so a re-run after
-the author pushes resumes where you were. A decision remembers what each
-file's hunks looked like; when the author reworks a feature's files, its badge
-turns to **updated**, the reworked files are marked in the diff, and their
-Viewed checks clear. Decide again to clear it. `--fresh` ignores the file and starts over. A
+the author pushes resumes where you were.
+
+Deciding on a feature saves a revision: the prose, the entities, the diagrams
+and every file's lines as you had them. Marking a file viewed saves that
+file's. On the next run the page shows what the author moved since, not just
+that something moved — a bar naming the parts that were reworked, an
+*updated* chip on each changed section, the old wording struck through beside
+the new in the scenario, description and tested blocks, and in the diff a
+yellow gutter on the lines that are new to you while the lines you already
+read stay plain. Focus review marks the same files in its rail and counts the
+new lines per file. **Mark as seen** takes the page as your new starting
+point; the reworked files' Viewed checks clear on their own. `--fresh` ignores the file and starts over. A
 static `build` keeps the state in the browser instead.
 
 ## The contract
