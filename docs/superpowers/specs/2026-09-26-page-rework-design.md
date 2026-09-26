@@ -57,10 +57,13 @@ against it, plus the sidebar checks.
   in PR A and `src/page/main.tsx` in PR B, which also adds `plugins: [bun-plugin-tailwind]`. It returns the JS and
   the CSS, which `buildHtml` inlines into `index.html` in the existing single-pass placeholder substitution (a
   value put in for one placeholder is never read as another).
-- Inlined JS has `</script` → `<\/script` and `<!--` → `<\!--`; inlined CSS has `</style` → `<\/style`.
+- The JS goes in as `<script src="data:text/javascript;base64,…">`: nothing in a base64 string can end the
+  element or hide its end, where escaping `<!--` in place would break a `/u` regular expression that contains it
+  (and the bundle does contain `<!--`). Inlined CSS has `</style` → `<\/style`.
 - Tailwind's source scan is pinned to `src/page` (`@import "tailwindcss" source(".")`), never the cwd.
-- The build runs once per process. If a cold build takes over ~300 ms, cache `{js, css}` under
-  `$XDG_CACHE_HOME/zreview` keyed by a hash of `src/page/**` and `package.json`.
+- The build runs once per process. Measured cold: 3–13 ms for PR A's bundle, so there is no cache. PR B
+  re-measures with React and Tailwind; only past ~300 ms would it cache `{js, css}` under `$XDG_CACHE_HOME/zreview`
+  keyed by a hash of `src/page/**` and `package.json`.
 - A missing dependency fails as a `ReviewError`: `run \`bun install\` in <checkout>`. A failed bundle fails with
   Bun's messages.
 - Page dependencies are pinned exactly and live in `dependencies` (the CLI builds the page at run time):
@@ -156,8 +159,8 @@ Forward, Looks good, Comment, close. Keys as today: → PgDn j, ← PgUp k, Ente
 ## Testing
 
 - **Unit (`bun test`):** PR A's modules, characterization-first; PR B's store actions, persistence and prefs.
-- **Build:** the page carries one inline bundle; `</script` and `<!--` are escaped; review text containing
-  `__APP__`, `__STATE__` or `</script>` cannot break the page.
+- **Build:** the page carries one script, the bundle byte for byte; review text containing `__APP__`,
+  `__STATE__` or `</script>` cannot break the page.
 - **End to end (`bun run e2e`):** playwright-core driving the installed Chrome (`channel: "chrome"`) against
   `zreview review --no-open` on a fixture. Locators are roles and text, so one script checks both UIs:
   feature navigation; approve and request changes with a note; a line comment and a selected-text comment;
