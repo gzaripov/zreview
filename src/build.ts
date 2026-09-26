@@ -190,7 +190,7 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     ];
     if (problems.length) throw new ReviewError(`${reviewPath}: ${problems.length} file${problems.length === 1 ? "" : "s"} out of step with the PR:\n  ${problems.join("\n  ")}`);
   }
-  const payload = JSON.stringify(review).replaceAll("</", "<\\/");
+  const payload = JSON.stringify(review).replaceAll("</", "<\\/").replaceAll("__", "_\\u005f");
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all(
     ["index.html", "style.css", "app.js"].map((name) => Bun.file(join(page, name)).text()),
