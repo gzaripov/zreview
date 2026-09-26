@@ -88,6 +88,12 @@ export class ReviewError extends Error {}
 
 export const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
 
+/** JSON to put inside a <script>. Every `<` is escaped: `</script` would end the element early, and `<!--`
+ *  followed by `<script` would hide the element's own `</script>` from the HTML parser. JSON.parse and JS
+ *  both read `\u003c` back as `<`. */
+export const inlineJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
 export function beforeAndAfter(after: string, hunks: Hunk[]): { before: string; after: string } | undefined {
   const next = after.split("\n"), prev: string[] = [], last = hunks.at(-1)?.lines.at(-1);
   let at = 0;
@@ -230,20 +236,20 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     ref.text = await texts.get(ref.path);
     if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
   })));
-  const payload = JSON.stringify(review).replaceAll("</", "<\\/").replaceAll("__", "_\\u005f");
+  const payload = inlineJson(review);
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all(
     ["index.html", "style.css", "app.js"].map((name) => Bun.file(join(page, name)).text()),
   );
-  const html = index
-    .replace("__TITLE__", `Review: ${review.pr.repo}#${review.pr.number}`)
-    .replace("__MERMAID__", mermaidVersion)
-    .replace("__STYLE__", () => style)
-    .replace("__SERVED__", String(opts.served))
-    // A served page keeps the token: serve() fills in the state it holds on every request, so a reload
-    // shows what the reviewer has done rather than what existed when the process started.
-    .replace("__STATE__", () => (opts.served ? "__STATE__" : "null"))
-    .replace("__REVIEW_JSON__", () => payload)
-    .replace("__APP__", () => app);
-  return { html, review, log };
+  // One pass over index.html: what goes in for one placeholder is never read as another, whatever the diff
+  // quotes. A served page gets a marker for its state that only this build knows; serve() fills it in on
+  // every request, so a reload shows what the reviewer has done rather than what existed at startup.
+  const stateSlot = opts.served ? `__STATE_${randomUUID().replaceAll("-", "")}__` : "null";
+  const title = review.plan ? `Plan: ${review.pr.repo} — ${review.pr.title}` : `Review: ${review.pr.repo}#${review.pr.number}`;
+  const values: Record<string, string> = {
+    TITLE: escapeHtml(title), MERMAID: mermaidVersion, STYLE: style, SERVED: String(opts.served),
+    STATE: stateSlot, REVIEW_JSON: payload, APP: app,
+  };
+  const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP)__/g, (_, key: string) => values[key]!);
+  return { html, review, log, stateSlot };
 }

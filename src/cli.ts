@@ -146,6 +146,7 @@ try {
     timeoutSeconds: Number(opt.timeout) || undefined,      // --timeout 0 waits forever
     persist: true,
     initialState: state,
+    stateSlot: built.stateSlot,
   });
 
   if (opt.json) console.log(JSON.stringify(outcome));
