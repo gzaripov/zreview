@@ -159,12 +159,6 @@
     while (j < n) push('ins', b[j++]);
     return out;
   }
-  const diffHtml = (before, after) => {
-    const parts = wordDiff(before, after);
-    if (!parts) return `<div class="wd plain">${esc(after)}</div>`;
-    return `<div class="wd">${parts.map(p => p.kind === 'same' ? esc(p.text)
-      : `<${p.kind === 'ins' ? 'ins' : 'del'}>${esc(p.text)}</${p.kind === 'ins' ? 'ins' : 'del'}>`).join('')}</div>`;
-  };
 
   // ---- blocks
   function shots(s) {
