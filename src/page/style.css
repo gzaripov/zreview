@@ -187,6 +187,7 @@ body.zoomed { overflow: hidden; }
 .rd hr { border: 0; border-top: 2px solid var(--line); }
 .rd pre { margin: 0; }
 .rd-front, .rd-raw { color: var(--muted); font-size: 12px; }
+.rd-note { padding: 8px 12px; margin: 0; }
 .rd-lines code { line-height: 1.5; }
 .rd-lines .ln { display: block; min-height: 1.5em; margin: 0 -12px; padding: 0 12px; }
 .rd-lines .ln.del { background: var(--del-bg); box-shadow: inset 3px 0 0 var(--bad); }

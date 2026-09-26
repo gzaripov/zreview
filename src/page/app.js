@@ -396,18 +396,27 @@
   }
   const byLine = (u) => u.type === 'front' || u.type === 'raw' || u.type === 'code';
   const linesOf = (u) => (u.type === 'code' ? u.token.text : u.raw.trim()).split('\n');
+  // How much two blocks share: the pieces both contain, weighted by length, over the larger block. Pairing
+  // asks this of every removed and added block in a changed stretch, so it counts instead of aligning:
+  // linear in the blocks' size, where a word-level LCS per pair could freeze the tab on a long rewrite.
+  function overlap(a, b) {
+    const left = new Map(); let sizeA = 0, sizeB = 0, same = 0;
+    for (const t of a) { left.set(t, (left.get(t) || 0) + 1); sizeA += t.length; }
+    for (const t of b) { sizeB += t.length; const k = left.get(t); if (k) { left.set(t, k - 1); same += t.length; } }
+    return same / Math.max(sizeA, sizeB, 1);
+  }
   function likeness(o, n) {
     if (o.type !== n.type || o.token?.depth !== n.token?.depth || (o.type === 'item' && o.list.ordered !== n.list.ordered)) return 0;
     if (o.type === 'table' && (o.token.header.length !== n.token.header.length || o.token.rows.length !== n.token.rows.length)) return 0;
     if (byLine(o)) {
       const a = linesOf(o), b = linesOf(n);
-      if (a.join('\n') === b.join('\n') || a.length * b.length > 1e6) return 0;
-      return lcsOps(a, b).filter(op => op[0] === 'same').length / Math.max(a.length, b.length);
+      return a.join('\n') === b.join('\n') ? 0 : overlap(a, b);
     }
-    const a = unitText(o), b = unitText(n), parts = a !== b && wordDiff(a, b);
-    if (!parts) return 0;
-    const solid = (s) => s.replace(/\s+/g, '').length;
-    return parts.reduce((k, p) => k + (p.kind === 'same' ? solid(p.text) : 0), 0) / Math.max(solid(a), solid(b), 1);
+    // Adjacent word pairs, not words: two unrelated paragraphs share most of their small words, but few
+    // of their word pairs, so a rewrite still reads as removed then added.
+    const a = unitText(o), b = unitText(n);
+    const pairs = (t) => { const w = t.split(/\s+/).filter(Boolean); return w.length < 2 ? w : w.slice(1).map((x, i) => `${w[i]} ${x}`); };
+    return a === b ? 0 : overlap(pairs(a), pairs(b));
   }
   function pairUp(ops, a, b) {
     const out = [];
@@ -484,13 +493,26 @@
     return e.html;
   }
 
-  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !!window.DOMPurify && !!richModel(file);
-  const fileBody = (f, file) => mdView === 'rendered' && canRender(file) ? richDiff(f, file) : hunks(f, file);
+  const rdFailed = new WeakSet();                  // files whose rendered view threw; they stay on their source diff
+  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !!window.DOMPurify && !rdFailed.has(file) && !!richModel(file);
+  function fileBody(f, file) {
+    if (mdView !== 'rendered' || !canRender(file)) return hunks(f, file);
+    // Blocks render lazily, here, outside richModel's guard. A block marked or hljs chokes on costs this
+    // file its rendered view; it must not blank the whole feature.
+    try { return richDiff(f, file); }
+    catch (e) {
+      console.error(`zreview: could not render ${file.path}`, e);
+      rdFailed.add(file);
+      return `<p class="none rd-note">The rendered view failed for this file, so it shows the source diff.</p>${hunks(f, file)}`;
+    }
+  }
   function mdToggle(file) {
     if (!MARKDOWN.test(file.path) || !file.hunks?.length) return '';
     const can = canRender(file), on = mdView === 'rendered' && can;
     const why = can ? '' : !window.DOMPurify ? 'The sanitizer did not load, so Markdown shows as source'
-      : 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit';
+      : !file.text ? 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit'
+      : rdFailed.has(file) ? 'The rendered view failed for this file, so it shows as source'
+      : 'No rendered view: the two versions are too large to compare block by block, or marked could not read them';
     return `<span class="mdview"${why ? ` title="${esc(why)}"` : ''}><button type="button" data-mdview="rendered" class="${on ? 'on' : ''}" ${can ? '' : 'disabled'}>Rendered</button><button type="button" data-mdview="source" class="${on ? '' : 'on'}">Source</button></span>`;
   }
   function setMdView(v) { mdView = v; localStorage.setItem('zreview:mdview', v); render(); renderFocus(); }
