@@ -22,15 +22,16 @@ the diff and the PR metadata.
 curl -fsSL https://raw.githubusercontent.com/gzaripov/zreview/main/install.sh | bash
 ```
 
-That clones to `~/code/zreview`, puts `zreview` on PATH with `bun link`, and
-installs the agent skill where both Claude Code and omp load it. Re-run it to
-update. From a checkout, `./install.sh` does the same.
+That clones to `~/code/zreview`, installs its dependencies from the lockfile,
+puts `zreview` and `zplan` on PATH with `bun link`, and installs the agent
+skill where both Claude Code and omp load it. Re-run it to update. From a
+checkout, `./install.sh` does the same.
 
 Manually:
 
 ```bash
 git clone https://github.com/gzaripov/zreview ~/code/zreview
-cd ~/code/zreview && bun link
+cd ~/code/zreview && bun install && bun link
 ln -sfn ~/code/zreview/skill ~/.agents/skills/zreview
 ln -sfn ~/.agents/skills/zreview ~/.claude/skills/zreview
 ```

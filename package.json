@@ -13,5 +13,6 @@
   "license": "MIT",
   "author": "Gleb Zaripov <https://zaripov.dev>",
   "repository": "github:gzaripov/zreview",
-  "keywords": ["pull-request", "code-review", "review", "cli", "bun"]
+  "keywords": ["pull-request", "code-review", "review", "cli", "bun"],
+  "dependencies": { "@happy-dom/global-registrator": "^20.14.5", "mermaid": "11.4.1" }
 }

@@ -26,6 +26,7 @@ else
   git clone --quiet "$REPO" "$SRC" && echo "cloned $SRC"
 fi
 
+(cd "$SRC" && bun install --frozen-lockfile --silent) && echo "installed dependencies"
 (cd "$SRC" && bun link >/dev/null 2>&1) && echo "linked: $(command -v zreview)"
 
 mkdir -p "$(dirname "$CANON")"
