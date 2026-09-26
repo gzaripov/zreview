@@ -2,6 +2,8 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import { blockOps, lcsOps, wordDiff } from './lib/diff.ts';
+import { esc } from './lib/html.ts';
+import { hlLines, langOf } from './lib/highlight.ts';
 
 // Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
 const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementById('review-boot').textContent);
@@ -44,7 +46,6 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   const entry = (id) => (state[id] ||= { comments: [] }, state[id].comments ||= [], state[id]);
   const uid = () => Math.random().toString(36).slice(2, 10);
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const md = (s) => s ? marked.parse(s) : '';
   const main = document.getElementById('main');
 
@@ -236,31 +237,6 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
       <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${mdToggle(file)}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
       ${open ? fileBody(f, file) : ''}
     </div>`;
-  }
-
-  // Syntax highlighting: each side of a hunk is highlighted as one block so
-  // multi-line tokens survive, then split back into lines.
-  const LANG = { ts: 'typescript', tsx: 'typescript', mts: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
-    py: 'python', rb: 'ruby', rs: 'rust', kt: 'kotlin', kts: 'kotlin', h: 'c', cc: 'cpp', hpp: 'cpp', cs: 'csharp', sh: 'bash', zsh: 'bash',
-    yml: 'yaml', toml: 'ini', md: 'markdown', html: 'xml', vue: 'xml', svelte: 'xml', gql: 'graphql', dockerfile: 'dockerfile', makefile: 'makefile' };
-  function langOf(path) {
-    const name = path.split('/').pop().toLowerCase(), ext = name.includes('.') ? name.split('.').pop() : name;
-    const l = LANG[ext] ?? ext;
-    return hljs.getLanguage(l) ? l : null;
-  }
-  function hlLines(text, lang) {
-    let html;
-    try { html = lang ? hljs.highlight(text, { language: lang, ignoreIllegals: true }).value : esc(text); } catch { html = esc(text); }
-    const out = [], open = []; let cur = '', last = 0, m;
-    const re = /(<span[^>]*>)|(<\/span>)|\n/g;
-    while ((m = re.exec(html))) {
-      cur += html.slice(last, m.index); last = re.lastIndex;
-      if (m[1]) { open.push(m[1]); cur += m[1]; }
-      else if (m[2]) { open.pop(); cur += m[2]; }
-      else { out.push(cur + '</span>'.repeat(open.length)); cur = open.join(''); }
-    }
-    out.push(cur + html.slice(last) + '</span>'.repeat(open.length));
-    return out;
   }
 
   function hunks(f, file) {
