@@ -30,7 +30,7 @@
   };
   let state = SERVED ? (INITIAL_STATE || {}) : load();
   let submitted = false;
-  let showDiff = true;                         // prose blocks show the old wording struck through while they are stale
+  let showDiff = true;                         // reworked prose shows what it said beside what it says
   let current = location.hash.slice(1) || (data.features[0] && data.features[0].id);
   const expanded = {};                         // featureId -> Set of file paths open in the diff
   const entry = (id) => (state[id] ||= { comments: [] }, state[id].comments ||= [], state[id]);
@@ -337,10 +337,15 @@
     ];
     const bar = ch.any ? `<div class="since">
       <span class="what"><b>Reworked since you looked${when ? ` on ${esc(when)}` : ''}:</b> ${esc(bits.join(', '))}</span>
-      <label class="hl"><input type="checkbox" ${showDiff ? 'checked' : ''}>Show the old wording</label>
+      <label class="hl"><input type="checkbox" ${showDiff ? 'checked' : ''}>Show before and after</label>
       <button class="seen" type="button" title="Take everything on this page as your new starting point">Mark as seen</button>
     </div>` : '';
-    const prose = (k, html) => showDiff && k in ch.text ? diffHtml(ch.text[k], textOf(f)[k]) : html;
+    // What a reworked passage said beside what it says, each rendered as the page renders it. A word-level
+    // diff of a rewrite interleaves two texts into one that reads as neither.
+    const sideBySide = (k, before, nowHtml) => `<div class="sbs">`
+      + `<div class="was"><div class="lbl">When you looked</div>${(k === 'scenario' ? esc(before) : md(before)) || '<p class="none">Empty.</p>'}</div>`
+      + `<div class="now"><div class="lbl">Now</div>${nowHtml}</div></div>`;
+    const prose = (k, html) => showDiff && k in ch.text ? sideBySide(k, ch.text[k], html) : html;
     const chip = (k) => k in ch.text || (k === 'diagrams' && ch.diagrams) ? `<span class="sub upd">updated</span>` : '';
     const decidedAt = !st.decision ? 'No decision yet'
       : `Decided ${new Date(st.at).toLocaleString()}${st.head === 'plan' && !PLAN ? ' on the plan' : st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}${upd.length ? `. <b>${upd.length} file${upd.length === 1 ? '' : 's'} changed since</b>, decide again.` : ''}`;
@@ -573,7 +578,7 @@
     const range = sel.getRangeAt(0);
     const node = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
     const region = node.closest('.commentable');
-    if (!region) { selbtn.hidden = true; return; }
+    if (!region || node.closest('.sbs .was')) { selbtn.hidden = true; return; }     // comments go on what it says now
     const r = range.getBoundingClientRect();
     Object.assign(selbtn.style, { left: `${r.left + scrollX}px`, top: `${r.top + scrollY - 34}px` });
     selbtn.hidden = false;
@@ -592,6 +597,7 @@
       if (!region) continue;
       const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.parentElement.closest('.sbs .was')) continue;
         const i = n.data.indexOf(c.quote);
         if (i < 0) continue;
         const mark = document.createElement('mark'); mark.className = 'hl'; mark.title = c.body;
