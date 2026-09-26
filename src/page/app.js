@@ -1,3 +1,10 @@
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import hljs from 'highlight.js/lib/common';
+
+// Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
+const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementById('review-boot').textContent);
+
 (() => {
   const data = JSON.parse(document.getElementById('review-data').textContent);
   marked.setOptions({ mangle: false, headerIds: false });
@@ -207,8 +214,8 @@
     if (!window.require?.config) return done(null);
     window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob(
       [`self.MonacoEnvironment={baseUrl:'${MONACO}/'};importScripts('${MONACO}/vs/base/worker/workerMain.js');`], { type: 'text/javascript' })) };
-    require.config({ paths: { vs: `${MONACO}/vs` } });
-    require(['vs/editor/editor.main'], () => {
+    window.require.config({ paths: { vs: `${MONACO}/vs` } });
+    window.require(['vs/editor/editor.main'], () => {
       const m = window.monaco;
       const rules = (kw, key, str, num, cm) => [
         { token: 'keyword', foreground: kw }, { token: 'string.key.json', foreground: key }, { token: 'string.value.json', foreground: str },
@@ -264,7 +271,7 @@
   function langOf(path) {
     const name = path.split('/').pop().toLowerCase(), ext = name.includes('.') ? name.split('.').pop() : name;
     const l = LANG[ext] ?? ext;
-    return window.hljs?.getLanguage(l) ? l : null;
+    return hljs.getLanguage(l) ? l : null;
   }
   function hlLines(text, lang) {
     let html;
@@ -373,7 +380,7 @@
     resolveLinks(body, u.ref, u.dir);
     body.querySelectorAll('pre code[class*="language-"]').forEach(el => {
       const lang = /language-(\S+)/.exec(el.className)[1];
-      if (window.hljs?.getLanguage(lang)) hljs.highlightElement(el);
+      if (hljs.getLanguage(lang)) hljs.highlightElement(el);
     });
     u.html = body.innerHTML;
     return u;
@@ -476,7 +483,7 @@
   }
   function lineDiffHtml(o, n) {
     const lang = n.type === 'front' ? 'yaml' : n.type === 'raw' ? 'markdown' : (n.token.lang || '').split(/\s/)[0];
-    const known = window.hljs?.getLanguage(lang) ? lang : null;
+    const known = hljs.getLanguage(lang) ? lang : null;
     const a = linesOf(o), b = linesOf(n), ha = hlLines(a.join('\n'), known), hb = hlLines(b.join('\n'), known);
     return `<pre class="rd-lines"><code>${lcsOps(a, b).map(([kind, i, j]) => `<span class="ln ${kind}">${kind === 'del' ? ha[i] : hb[j]}</span>`).join('')}</code></pre>`;
   }
@@ -493,7 +500,7 @@
   }
 
   const rdFailed = new WeakSet();                  // files whose rendered view threw; they stay on their source diff
-  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !!window.DOMPurify && !rdFailed.has(file) && !!richModel(file);
+  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !rdFailed.has(file) && !!richModel(file);
   function fileBody(f, file) {
     if (mdView !== 'rendered' || !canRender(file)) return hunks(f, file);
     // Blocks render lazily, here, outside richModel's guard. A block marked or hljs chokes on costs this
@@ -508,8 +515,7 @@
   function mdToggle(file) {
     if (!MARKDOWN.test(file.path) || !file.hunks?.length) return '';
     const can = canRender(file), on = mdView === 'rendered' && can;
-    const why = can ? '' : !window.DOMPurify ? 'The sanitizer did not load, so Markdown shows as source'
-      : !file.text ? 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit'
+    const why = can ? '' : !file.text ? 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit'
       : rdFailed.has(file) ? 'The rendered view failed for this file, so it shows as source'
       : 'No rendered view: the two versions are too large to compare block by block, or marked could not read them';
     return `<span class="mdview"${why ? ` title="${esc(why)}"` : ''}><button type="button" data-mdview="rendered" class="${on ? 'on' : ''}" ${can ? '' : 'disabled'}>Rendered</button><button type="button" data-mdview="source" class="${on ? '' : 'on'}">Source</button></span>`;
