@@ -140,23 +140,28 @@
   const changedSince = (f) => Object.keys(sinceOf(f).files).sort();
 
   // ---- word-level diff for the prose blocks, so "what changed" shows what changed
-  function wordDiff(before, after) {
-    const tok = (s) => s.split(/(\s+)/).filter(x => x !== '');
-    const a = tok(before), b = tok(after);
-    if (a.length + b.length > 2400) return null;               // too long to diff cheaply; show the text plain
+  function lcsOps(a, b) {
     const m = a.length, n = b.length;
     const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
     for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    const out = []; let i = 0, j = 0;
-    const push = (kind, text) => { const last = out[out.length - 1]; last && last.kind === kind ? last.text += text : out.push({ kind, text }); };
+    const ops = []; let i = 0, j = 0;
     while (i < m && j < n) {
-      if (a[i] === b[j]) { push('same', b[j]); i++; j++; }
-      else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i++]); }
-      else { push('ins', b[j++]); }
+      if (a[i] === b[j]) ops.push(['same', i++, j++]);
+      else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push(['del', i++, -1]);
+      else ops.push(['ins', -1, j++]);
     }
-    while (i < m) push('del', a[i++]);
-    while (j < n) push('ins', b[j++]);
+    while (i < m) ops.push(['del', i++, -1]);
+    while (j < n) ops.push(['ins', -1, j++]);
+    return ops;
+  }
+  function wordDiff(before, after) {
+    const tok = (s) => s.split(/(\s+)/).filter(x => x !== '');
+    const a = tok(before), b = tok(after);
+    if (a.length + b.length > 2400) return null;               // too long to diff cheaply; show the text plain
+    const out = [];
+    const push = (kind, text) => { const last = out[out.length - 1]; last && last.kind === kind ? last.text += text : out.push({ kind, text }); };
+    for (const [kind, i, j] of lcsOps(a, b)) push(kind, kind === 'del' ? a[i] : b[j]);
     return out;
   }
   const diffHtml = (before, after) => {
@@ -252,8 +257,8 @@
     const upd = !!ch, chip = ch?.added != null ? `${ch.added} new line${ch.added === 1 ? '' : 's'}${ch.gone ? `, ${ch.gone} gone` : ''}` : 'updated since your last look';
     const stat = file.hunks ? `<span class="stat"><span class="a">+${file.add}</span> <span class="d">−${file.del}</span></span>` : '';
     return `<div class="file ${seen ? 'seen' : ''}" data-path="${esc(file.path)}">
-      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
-      ${open ? hunks(f, file) : ''}
+      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${mdToggle(file)}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
+      ${open ? fileBody(f, file) : ''}
     </div>`;
   }
 
@@ -288,8 +293,13 @@
     const cs = entry(f.id).comments.filter(c => c.kind === 'line' && c.file === file.path);
     const lang = langOf(file.path);
     const fresh = sinceOf(f).files[file.path]?.fresh;        // lines the reviewer has not seen
+    // A comment on a line no row below shows is listed above the rows instead of vanishing: one made on an
+    // unchanged block in the rendered view, or one whose line the author's rework moved out of the diff.
+    const rows = new Set(file.hunks.flatMap(h => h.lines.map(l => l.t === '-' ? `old ${l.old}` : `new ${l.new}`)));
+    const outside = cs.filter(c => !rows.has(`${c.side} ${c.line}`)).map(c =>
+      `<div class="lc outside"><div class="who">${c.side === 'old' ? 'old ' : ''}line ${c.line}, outside the diff<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
     let fi = 0;
-    return file.hunks.map(h => {
+    return outside + file.hunks.map(h => {
       const oh = hlLines(h.lines.filter(l => l.t !== '+').map(l => l.text).join('\n'), lang);
       const nh = hlLines(h.lines.filter(l => l.t !== '-').map(l => l.text).join('\n'), lang);
       let oi = 0, ni = 0;
@@ -303,6 +313,267 @@
           mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
       }).join('')}</div>`;
     }).join('');
+  }
+
+  const MARKDOWN = /\.(md|markdown|mdx)$/i;
+  const PURIFY = { FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'option'], FORBID_ATTR: ['style', 'form', 'formaction'] };
+  let mdView = localStorage.getItem('zreview:mdview') || 'rendered';
+  const richCache = new WeakMap(), richOpen = new Set();
+
+  function mdUnits(source, ref, dir) {
+    const text = source.replace(/\r\n?/g, '\n').replace(/^( *)(\t+)/gm, (_, s, t) => s + '    '.repeat(t.length));
+    const units = [];
+    let cursor = 0, pos = 0, line = 1;
+    const lineAt = (at) => { for (; pos < at; pos++) if (text.charCodeAt(pos) === 10) line++; return line; };
+    const span = (raw) => {
+      const at = Math.max(text.indexOf(raw, cursor), cursor);
+      cursor = at + raw.length;
+      return { from: lineAt(at), to: lineAt(at + Math.max(raw.trimEnd().length - 1, 0)) };
+    };
+    const unit = (type, raw, key, extra) => units.push({ type, raw, key, ref, dir, ...extra, ...span(raw) });
+    const front = /^---\n[\s\S]*?\n---[ \t]*(?:\n|$)/.exec(text);
+    if (front) unit('front', front[0], 'front\n' + front[0].trim());
+    for (const t of marked.lexer(text.slice(cursor))) {
+      if (t.type === 'space') { span(t.raw); continue; }
+      if (t.type !== 'list') { unit(t.type, t.raw, `${t.type}${t.depth ?? ''}\n${t.raw.trim()}`, { token: t }); continue; }
+      const at = Math.max(text.indexOf(t.raw, cursor), cursor);
+      cursor = at;
+      for (const item of t.items) unit('item', item.raw, `item${t.ordered ? 1 : ''}\n${item.raw.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim()}`, { list: t, item });
+      cursor = Math.max(cursor, at + t.raw.length);
+    }
+    // marked keeps some source out of every token: a link reference definition (`[docs]: https://…`) sets
+    // the target of every `[docs]` without a block of its own. A change there would not show in the rendered
+    // view at all, so each run of non-blank lines that no block covers becomes a block of its own.
+    const lines = text.split('\n'), covered = new Uint8Array(lines.length + 2), loose = [];
+    for (const u of units) for (let n = u.from; n <= u.to; n++) covered[n] = 1;
+    for (let n = 1; n <= lines.length; n++) {
+      if (covered[n] || !lines[n - 1].trim()) continue;
+      let m = n;
+      while (m < lines.length && !covered[m + 1] && lines[m].trim()) m++;
+      const raw = lines.slice(n - 1, m).join('\n');
+      loose.push({ type: 'raw', raw, key: `raw\n${raw.trim()}`, ref, dir, from: n, to: m });
+      n = m;
+    }
+    return loose.length ? [...units, ...loose].sort((x, y) => x.from - y.from) : units;
+  }
+
+  function resolveLinks(root, ref, dir) {
+    const fix = (el, attr, kind) => {
+      const v = el.getAttribute(attr);
+      if (!v || /^([a-z][a-z0-9+.-]*:|#|\/\/)/i.test(v)) return;
+      el.setAttribute(attr, new URL(v.startsWith('/') ? `.${v}` : dir + v, `https://github.com/${data.pr.repo}/${kind}/${ref}/`).href);
+    };
+    root.querySelectorAll('a[href]').forEach(a => fix(a, 'href', 'blob'));
+    root.querySelectorAll('img[src]').forEach(img => fix(img, 'src', 'raw'));
+  }
+  function renderUnit(u) {
+    if (u.html !== undefined) return u;
+    const html = u.type === 'front' || u.type === 'raw' ? `<pre class="rd-${u.type}"><code>${esc(u.raw.trim())}</code></pre>`
+      : marked.parser([u.type === 'item' ? { ...u.list, items: [u.item] } : u.token]);
+    const box = document.createElement('div');
+    box.innerHTML = DOMPurify.sanitize(html, PURIFY);
+    const body = u.type === 'item' ? box.querySelector('li') || box : box;
+    if (!body.textContent.trim() && !body.querySelector('img, hr, input')) body.innerHTML = `<pre class="rd-raw"><code>${esc(u.raw.trim())}</code></pre>`;
+    body.querySelectorAll('input').forEach(i => i.type === 'checkbox' ? (i.disabled = true) : i.remove());
+    u.text = body.textContent;
+    resolveLinks(body, u.ref, u.dir);
+    body.querySelectorAll('pre code[class*="language-"]').forEach(el => {
+      const lang = /language-(\S+)/.exec(el.className)[1];
+      if (window.hljs?.getLanguage(lang)) hljs.highlightElement(el);
+    });
+    u.html = body.innerHTML;
+    return u;
+  }
+  const unitText = (u) => renderUnit(u).text;
+  const unitHtml = (u) => renderUnit(u).html;
+
+  function blockOps(a, b) {
+    let s = 0, e = 0;
+    while (s < a.length && s < b.length && a[s] === b[s]) s++;
+    while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+    const midA = a.slice(s, a.length - e), midB = b.slice(s, b.length - e);
+    if (midA.length * midB.length > 4e6) return null;
+    const ops = [];
+    for (let k = 0; k < s; k++) ops.push(['same', k, k]);
+    for (const [kind, i, j] of lcsOps(midA, midB)) ops.push([kind, i < 0 ? -1 : i + s, j < 0 ? -1 : j + s]);
+    for (let k = 0; k < e; k++) ops.push(['same', a.length - e + k, b.length - e + k]);
+    return ops;
+  }
+  const byLine = (u) => u.type === 'front' || u.type === 'raw' || u.type === 'code';
+  const linesOf = (u) => (u.type === 'code' ? u.token.text : u.raw.trim()).split('\n');
+  // How much two blocks share: the pieces both contain, weighted by length, over the larger block. Pairing
+  // asks this of every removed and added block in a changed stretch, so it counts instead of aligning:
+  // linear in the blocks' size, where a word-level LCS per pair could freeze the tab on a long rewrite.
+  function overlap(a, b) {
+    const left = new Map(); let sizeA = 0, sizeB = 0, same = 0;
+    for (const t of a) { left.set(t, (left.get(t) || 0) + 1); sizeA += t.length; }
+    for (const t of b) { sizeB += t.length; const k = left.get(t); if (k) { left.set(t, k - 1); same += t.length; } }
+    return same / Math.max(sizeA, sizeB, 1);
+  }
+  function likeness(o, n) {
+    if (o.type !== n.type || o.token?.depth !== n.token?.depth || (o.type === 'item' && o.list.ordered !== n.list.ordered)) return 0;
+    if (o.type === 'table' && (o.token.header.length !== n.token.header.length || o.token.rows.length !== n.token.rows.length)) return 0;
+    if (byLine(o)) {
+      const a = linesOf(o), b = linesOf(n);
+      return a.join('\n') === b.join('\n') ? 0 : overlap(a, b);
+    }
+    // Adjacent word pairs, not words: two unrelated paragraphs share most of their small words, but few
+    // of their word pairs, so a rewrite still reads as removed then added.
+    const a = unitText(o), b = unitText(n);
+    const pairs = (t) => { const w = t.split(/\s+/).filter(Boolean); return w.length < 2 ? w : w.slice(1).map((x, i) => `${w[i]} ${x}`); };
+    return a === b ? 0 : overlap(pairs(a), pairs(b));
+  }
+  function pairUp(ops, a, b) {
+    const out = [];
+    for (let k = 0; k < ops.length;) {
+      if (ops[k][0] === 'same') { out.push({ kind: 'same', old: a[ops[k][1]], new: b[ops[k][2]] }); k++; continue; }
+      const gone = [], come = [];
+      for (; k < ops.length && ops[k][0] !== 'same'; k++) ops[k][0] === 'del' ? gone.push(a[ops[k][1]]) : come.push(b[ops[k][2]]);
+      let next = 0;
+      for (const o of gone) {
+        let best = -1, score = 0.5;
+        if (gone.length * come.length <= 400) for (let y = next; y < come.length; y++) { const s = likeness(o, come[y]); if (s > score) { best = y; score = s; } }
+        if (best < 0) { out.push({ kind: 'del', old: o }); continue; }
+        for (; next < best; next++) out.push({ kind: 'add', new: come[next] });
+        out.push({ kind: 'mod', old: o, new: come[next++] });
+      }
+      for (; next < come.length; next++) out.push({ kind: 'add', new: come[next] });
+    }
+    return out;
+  }
+  function richModel(file) {
+    if (richCache.has(file)) return richCache.get(file);
+    let model = null;
+    try {
+      const dir = file.path.slice(0, file.path.lastIndexOf('/') + 1);
+      const a = mdUnits(file.text.before, data.pr.base, dir), b = mdUnits(file.text.after, data.pr.head, dir);
+      const ops = blockOps(a.map(u => u.key), b.map(u => u.key));
+      if (ops) model = pairUp(ops, a, b);
+    } catch (e) { console.error(`zreview: could not render ${file.path}`, e); }
+    richCache.set(file, model);
+    return model;
+  }
+
+  function markWords(root, before) {
+    const parts = wordDiff(before, root.textContent);
+    if (!parts) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+    let k = 0, off = 0;
+    const gone = (text) => {
+      const d = document.createElement('del'); d.textContent = text;
+      if (k >= nodes.length) return nodes.length && nodes[nodes.length - 1].after(d);
+      if (off) { nodes[k] = nodes[k].splitText(off); off = 0; }
+      nodes[k].before(d);
+    };
+    for (const p of parts) {
+      if (p.kind === 'del') { if (p.text.trim()) gone(p.text); continue; }
+      for (let left = p.text.length; left > 0 && k < nodes.length;) {
+        const node = nodes[k], take = Math.min(node.data.length - off, left);
+        left -= take;
+        if (p.kind === 'ins' && node.data.slice(off, off + take).trim()) {
+          const seg = off ? node.splitText(off) : node, rest = take < seg.data.length ? seg.splitText(take) : null;
+          const ins = document.createElement('ins'); seg.before(ins); ins.append(seg);
+          if (rest) nodes[k] = rest; else k++;
+          off = 0;
+        } else if ((off += take) >= node.data.length) { k++; off = 0; }
+      }
+    }
+  }
+  function lineDiffHtml(o, n) {
+    const lang = n.type === 'front' ? 'yaml' : n.type === 'raw' ? 'markdown' : (n.token.lang || '').split(/\s/)[0];
+    const known = window.hljs?.getLanguage(lang) ? lang : null;
+    const a = linesOf(o), b = linesOf(n), ha = hlLines(a.join('\n'), known), hb = hlLines(b.join('\n'), known);
+    return `<pre class="rd-lines"><code>${lcsOps(a, b).map(([kind, i, j]) => `<span class="ln ${kind}">${kind === 'del' ? ha[i] : hb[j]}</span>`).join('')}</code></pre>`;
+  }
+  function entryHtml(e) {
+    if (e.kind !== 'mod') return unitHtml(e.kind === 'del' ? e.old : e.new);
+    if (e.html === undefined && byLine(e.new)) e.html = lineDiffHtml(e.old, e.new);
+    if (e.html === undefined) {
+      const box = document.createElement('div');
+      box.innerHTML = unitHtml(e.new);
+      markWords(box, unitText(e.old));
+      e.html = box.innerHTML;
+    }
+    return e.html;
+  }
+
+  const rdFailed = new WeakSet();                  // files whose rendered view threw; they stay on their source diff
+  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !!window.DOMPurify && !rdFailed.has(file) && !!richModel(file);
+  function fileBody(f, file) {
+    if (mdView !== 'rendered' || !canRender(file)) return hunks(f, file);
+    // Blocks render lazily, here, outside richModel's guard. A block marked or hljs chokes on costs this
+    // file its rendered view; it must not blank the whole feature.
+    try { return richDiff(f, file); }
+    catch (e) {
+      console.error(`zreview: could not render ${file.path}`, e);
+      rdFailed.add(file);
+      return `<p class="none rd-note">The rendered view failed for this file, so it shows the source diff.</p>${hunks(f, file)}`;
+    }
+  }
+  function mdToggle(file) {
+    if (!MARKDOWN.test(file.path) || !file.hunks?.length) return '';
+    const can = canRender(file), on = mdView === 'rendered' && can;
+    const why = can ? '' : !window.DOMPurify ? 'The sanitizer did not load, so Markdown shows as source'
+      : !file.text ? 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit'
+      : rdFailed.has(file) ? 'The rendered view failed for this file, so it shows as source'
+      : 'No rendered view: the two versions are too large to compare block by block, or marked could not read them';
+    return `<span class="mdview"${why ? ` title="${esc(why)}"` : ''}><button type="button" data-mdview="rendered" class="${on ? 'on' : ''}" ${can ? '' : 'disabled'}>Rendered</button><button type="button" data-mdview="source" class="${on ? '' : 'on'}">Source</button></span>`;
+  }
+  function setMdView(v) { mdView = v; localStorage.setItem('zreview:mdview', v); render(); renderFocus(); }
+  function bindRendered(root, f, redraw) {
+    root.querySelectorAll('[data-mdview]').forEach(b => b.onclick = (e) => { e.stopPropagation(); if (!b.disabled) setMdView(b.dataset.mdview); });
+    root.querySelectorAll('.rd-u > .rc').forEach(b => b.onclick = () => { if (!submitted) openLineComposer(f, b.parentElement, redraw); });
+    root.querySelectorAll('.rd-more').forEach(b => b.onclick = () => { richOpen.add(b.dataset.more); redraw(); });
+  }
+
+  function richDiff(f, file) {
+    const rows = richModel(file);
+    const unitOn = (e, side) => side === 'old' ? e.old : e.kind === 'del' ? null : e.new;
+    const own = new Map();
+    for (const c of entry(f.id).comments.filter(c => c.kind === 'line' && c.file === file.path)) {
+      let at = -1;
+      rows.forEach((e, i) => { const u = unitOn(e, c.side); if (u && u.from <= c.line) at = i; });
+      if (at < 0) at = Math.max(rows.findIndex(e => unitOn(e, c.side)), 0);
+      own.set(at, [...(own.get(at) || []), c]);
+    }
+    const fresh = sinceOf(f).files[file.path]?.fresh, unseen = { old: new Set(), new: new Set() };
+    if (fresh) { let fi = 0; for (const h of file.hunks) for (const l of h.lines) if (fresh[fi++]) l.t === '-' ? unseen.old.add(l.old) : unseen.new.add(l.new); }
+    const isFresh = (e) => ['old', 'new'].some(side => {
+      const u = unitOn(e, side);
+      for (let n = u?.from; u && n <= u.to; n++) if (unseen[side].has(n)) return true;
+      return false;
+    });
+    const changed = rows.map((e, i) => e.kind !== 'same' || own.has(i));
+    const near = rows.map((_, i) => changed.slice(Math.max(0, i - 2), i + 3).some(Boolean));
+    const folded = new Map();
+    for (let i = 0; i < rows.length;) {
+      if (near[i]) { i++; continue; }
+      let j = i; while (j < rows.length && !near[j]) j++;
+      if (j - i >= 3 && !richOpen.has(`${file.path}#${i}`)) folded.set(i, j);
+      i = j;
+    }
+    const row = (i, tag) => {
+      const e = rows[i], side = e.kind === 'del' ? 'old' : 'new', u = unitOn(e, side), nw = isFresh(e);
+      const notes = (own.get(i) || []).map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
+      return `<${tag} class="rd-u ${e.kind} t-${u.type}${nw ? ' fresh' : ''}" data-side="${side}" data-line="${u.from}"${nw ? ' title="New since your last look"' : ''}>`
+        + `${submitted ? '' : '<button type="button" class="rc" title="Comment on this">+</button>'}${entryHtml(e)}${tag === 'li' ? notes : ''}</${tag}>${tag === 'li' ? '' : notes}`;
+    };
+    const out = [];
+    for (let i = 0; i < rows.length;) {
+      if (folded.has(i)) {
+        const n = folded.get(i) - i;
+        out.push(`<button type="button" class="rd-more" data-more="${esc(`${file.path}#${i}`)}">⋯ ${n} unchanged block${n === 1 ? '' : 's'}</button>`);
+        i += n; continue;
+      }
+      const u = rows[i].new ?? rows[i].old;
+      if (u.type !== 'item') { out.push(row(i++, 'div')); continue; }
+      const items = [];
+      for (; i < rows.length && !folded.has(i) && (rows[i].new ?? rows[i].old).type === 'item' && (rows[i].new ?? rows[i].old).list.ordered === u.list.ordered; i++) items.push(row(i, 'li'));
+      const start = Number(/^\s*(\d+)/.exec(u.raw)?.[1] ?? 1);
+      out.push(u.list.ordered ? `<ol${start !== 1 ? ` start="${start}"` : ''}>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`);
+    }
+    return `<div class="rd">${out.join('')}</div>`;
   }
 
   function commentList(f) {
@@ -384,6 +655,7 @@
     main.querySelector('.focusbtn') && (main.querySelector('.focusbtn').onclick = () => openFocus(f));
     main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, f.files.find(x => x.path === cb.closest('.file').dataset.path), cb.checked));
     main.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row); });
+    bindRendered(main, f, render);
     main.querySelectorAll('[data-del]').forEach(b => b.onclick = (e) => {
       e.stopPropagation(); const cs = entry(f.id).comments; cs.splice(cs.findIndex(c => c.id === b.dataset.del), 1); save(); render();
     });
@@ -451,6 +723,7 @@
   // ---- focus review: one file at a time, full screen, in that order
   const focus = document.getElementById('focus');
   let focusAt = -1;                                 // index into reading(current).flat, -1 when closed
+  let focusShown = null;                            // the file the panel last drew, so a redraw of it keeps its scroll
   const focusOpen = () => focusAt >= 0;
   function openFocus(f, index) {
     const { flat } = reading(f);
@@ -463,7 +736,7 @@
   }
   function closeFocus() {
     if (!focusOpen()) return;
-    focusAt = -1; focus.hidden = true; focus.querySelector('.code').replaceChildren();
+    focusAt = -1; focusShown = null; focus.hidden = true; focus.querySelector('.code').replaceChildren();
     document.body.classList.remove('zoomed');
     render();
   }
@@ -504,11 +777,17 @@
     rail.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });
 
     const code = focus.querySelector('.code');
+    // A new file starts at its top. A redraw of the same one (a comment, an unfolded block, Rendered or
+    // Source) keeps the reader's place, now that the panel scrolls.
+    const shown = `${f.id}\n${file.path}`, keep = focusShown === shown ? code.scrollTop : 0;
     const cs = entry(f.id).comments.filter(c => c.kind === 'file' && c.file === file.path);
     code.innerHTML = `${cs.map(c => `<div class="lc"><div class="who">file comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('')}
-      <div class="file" data-path="${esc(file.path)}">${hunks(f, file)}</div>`;
-    code.scrollTop = 0;
+      <div class="file" data-path="${esc(file.path)}">${fileBody(f, file)}</div>`;
+    code.scrollTop = keep;
+    focusShown = shown;
+    focus.querySelector('.mdbox').innerHTML = mdToggle(file);
     code.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row, renderFocus); });
+    bindRendered(focus, f, renderFocus);
     code.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
       const list = entry(f.id).comments; list.splice(list.findIndex(c => c.id === b.dataset.del), 1); save(); renderFocus();
     });
@@ -646,6 +925,10 @@
     else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'k') { e.preventDefault(); goFocus(-1); }
     else if (key === 'Enter') { e.preventDefault(); markGood(); }
     else if (key === 'c' || key === 'C') { e.preventDefault(); fileComposer(); }
+    else if (key === 'r' || key === 'R') {
+      const file = reading(data.features.find(x => x.id === current)).flat[focusAt];
+      if (file && canRender(file)) { e.preventDefault(); setMdView(mdView === 'rendered' ? 'source' : 'rendered'); }
+    }
   });
   render();
 })();

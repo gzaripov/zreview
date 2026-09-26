@@ -22,10 +22,10 @@ the diff and the PR metadata.
 curl -fsSL https://raw.githubusercontent.com/gzaripov/zreview/main/install.sh | bash
 ```
 
-That clones to `~/code/zreview`, installs its dependencies from the lockfile,
-puts `zreview` and `zplan` on PATH with `bun link`, and installs the agent
-skill where both Claude Code and omp load it. Re-run it to update. From a
-checkout, `./install.sh` does the same.
+That clones to `~/code/zreview`, installs Mermaid with `bun install`, puts
+`zreview` and `zplan` on PATH with `bun link`, and installs the agent skill
+where both Claude Code and omp load it. Re-run it to update. From a checkout,
+`./install.sh` does the same.
 
 Manually:
 
@@ -99,9 +99,19 @@ and the page degrades to file links.
   types the feature declares, then what stores them, the logic, the
   interfaces it is reached through, the surface, and last the tests and
   generated files. `→` `PgDn` and `←` `PgUp` move, `Enter` marks the file
-  viewed and goes on, `C` comments on the whole file, `Esc` returns. A
-  horizontal swipe works on a touchscreen. Clicking a diff line still
-  comments on that line.
+  viewed and goes on, `C` comments on the whole file, `Esc` returns, `R`
+  switches a Markdown file between rendered and source. A horizontal swipe
+  works on a touchscreen. Clicking a diff line still comments on that line.
+- **Markdown, rendered** — `.md` and `.mdx` files open as the document they
+  become. Added blocks are green, removed ones red, and an edited paragraph
+  or list item shows its changed words in place. Changed front matter and
+  code blocks show their changed lines. Long unchanged stretches fold, and a
+  click unfolds them. The `+` on a block comments on its first line, like a
+  diff-line comment. **Rendered | Source** in the file's header switches the
+  view, and the page remembers the choice. A changed file renders only when
+  zreview can fetch the whole file with `gh` at `pr.head` and it matches the
+  diff. Otherwise the file shows its source diff. Added and deleted files
+  always render.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.
@@ -171,7 +181,7 @@ Exit code is `0` unless you ask for it to mean something:
 |---|---|
 | default | `0` for any outcome |
 | `--require-approval` | `0` approved, `1` anything else |
-| always | `2` when zreview could not run: bad `review.json`, missing screenshot, existing `--result-file` |
+| always | `2` when zreview could not run: bad `review.json`, a diagram Mermaid cannot parse, missing screenshot, existing `--result-file` |
 
 The `2` fires before any server starts, so a bad invocation never opens a tab.
 
@@ -245,6 +255,10 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
         { "title": "At the byte ceiling", "note": "65,536 bytes exactly; one more is rejected before parsing.", "value": { "momo": 1, "kind": "spinoff", "title": "…", "words": [] } } ] } ]
   ```
 
+- `diagrams` are Mermaid. zreview parses each one with the Mermaid version the
+  page renders it with, pinned in `package.json`. If one fails, zreview exits
+  `2` naming the feature, the diagram and Mermaid's parse error, before any tab
+  opens. That way a diagram never reaches the reviewer as a syntax error.
 - `screenshots` is `null` when the feature has no user-visible surface; the
   page says so rather than leaving a blank. Paths are relative to `review.json`.
 - `files` are hashed into `#diff-<sha256>` links into the PR's Files tab and
@@ -268,8 +282,9 @@ as PNG. Nothing is ever upscaled. A real phone screen inlines at roughly 100 KB.
 src/cli.ts        the contract: flags, stdout, exit codes
 src/serve.ts      localhost server; resolves on Submit or tab close
 src/build.ts      review.json → HTML; diff parsing; screenshot inlining
+src/diagrams.ts   parses each diagram with the Mermaid the page renders it with
 src/page/         index.html, style.css, app.js — inlined into one file at build
 skill/SKILL.md    the agent skill; install.sh links it into ~/.claude/skills
 ```
 
-Bun only, no dependencies. MIT.
+Bun, plus one dependency: Mermaid, to check the diagrams. MIT.

@@ -3,3 +3,4 @@ review.html
 review.json
 *.tmp
 .DS_Store
+bun.lock

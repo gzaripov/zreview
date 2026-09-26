@@ -6,7 +6,7 @@
 // browser moved to another tab group. Every change is already on disk, so a
 // reviewer who closes the tab loses nothing and can re-run to pick it up.
 
-import type { Review } from "./build.ts";
+import { inlineJson, type Review } from "./build.ts";
 import { saveState, type ReviewState } from "./state.ts";
 
 export type FeatureDecision = { decision: "approved" | "changes"; note?: string; at?: number };
@@ -16,7 +16,11 @@ export type Outcome = {
   summary: string;
   url: string;
 };
-export type ServeOptions = { port: number; open: boolean; timeoutSeconds?: number; persist: boolean; initialState?: ReviewState | null };
+export type ServeOptions = {
+  port: number; open: boolean; timeoutSeconds?: number; persist: boolean; initialState?: ReviewState | null;
+  /** The marker buildHtml left where the page's state goes. */
+  stateSlot: string;
+};
 
 /** All features approved -> approved. Any changes requested -> changes. Otherwise something was left open. */
 export function classify(review: Review, features: Record<string, FeatureDecision>): Outcome["decision"] {
@@ -38,7 +42,10 @@ export function serve(html: string, review: Review, opts: ServeOptions): Promise
     resolve(outcome);
   };
   let latest: ReviewState = opts.initialState ?? {};
-  const page = () => html.replace("__STATE__", () => JSON.stringify(latest).replaceAll("</", "<\\/"));
+  // Split once around the marker; each request only joins the halves around the current state.
+  const halves = html.split(opts.stateSlot);
+  if (halves.length !== 2) throw new Error(`zreview: the page has ${halves.length - 1} state markers, not one`);
+  const page = () => halves[0] + inlineJson(latest) + halves[1];
   const dismissed = () => ({
     decision: "dismissed" as const,
     features: Object.fromEntries(Object.entries(latest).filter(([, f]) => f.decision)) as Record<string, FeatureDecision>,
