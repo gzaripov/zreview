@@ -114,6 +114,18 @@ export function beforeAndAfter(after: string, hunks: Hunk[]): { before: string; 
   return { before: prev.join("\n"), after };
 }
 
+/** At most `n` calls of `fn` in flight. A finishing call hands its slot straight to the next waiting one. */
+function limited<A extends unknown[], R>(n: number, fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (...args) => {
+    if (active < n) active++;
+    else await new Promise<void>((go) => waiting.push(go));
+    try { return await fn(...args); }
+    finally { const next = waiting.shift(); if (next) next(); else active--; }
+  };
+}
+
 async function markdownText(ref: FileRef, headText: BuildOptions["headText"]): Promise<FileRef["text"]> {
   const side = (skip: string) => ref.hunks!.flatMap((h) => h.lines.filter((l) => l.t !== skip).map((l) => l.text)).join("\n");
   if (ref.status === "added") return { before: "", after: side("-") };
@@ -230,9 +242,11 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     if (problems.length) throw new ReviewError(`${reviewPath}: ${problems.length} file${problems.length === 1 ? "" : "s"} out of step with the PR:\n  ${problems.join("\n  ")}`);
   }
   const texts = new Map<string, Promise<FileRef["text"]>>();
+  // A docs PR can change hundreds of Markdown files: fetch six at a time, not one gh process for each at once.
+  const headText = opts.headText && limited(6, opts.headText);
   await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
     if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
-    if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, opts.headText));
+    if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, headText));
     ref.text = await texts.get(ref.path);
     if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
   })));
