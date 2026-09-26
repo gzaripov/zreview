@@ -1,6 +1,7 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
+import { blockOps, lcsOps, wordDiff } from './lib/diff.ts';
 
 // Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
 const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementById('review-boot').textContent);
@@ -145,32 +146,6 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   const forgetSince = () => { sinceMemo = { id: null, val: null }; };
   /** Paths whose hunks differ from what the reviewer last saw. */
   const changedSince = (f) => Object.keys(sinceOf(f).files).sort();
-
-  // ---- word-level diff for the prose blocks, so "what changed" shows what changed
-  function lcsOps(a, b) {
-    const m = a.length, n = b.length;
-    const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
-    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    const ops = []; let i = 0, j = 0;
-    while (i < m && j < n) {
-      if (a[i] === b[j]) ops.push(['same', i++, j++]);
-      else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push(['del', i++, -1]);
-      else ops.push(['ins', -1, j++]);
-    }
-    while (i < m) ops.push(['del', i++, -1]);
-    while (j < n) ops.push(['ins', -1, j++]);
-    return ops;
-  }
-  function wordDiff(before, after) {
-    const tok = (s) => s.split(/(\s+)/).filter(x => x !== '');
-    const a = tok(before), b = tok(after);
-    if (a.length + b.length > 2400) return null;               // too long to diff cheaply; show the text plain
-    const out = [];
-    const push = (kind, text) => { const last = out[out.length - 1]; last && last.kind === kind ? last.text += text : out.push({ kind, text }); };
-    for (const [kind, i, j] of lcsOps(a, b)) push(kind, kind === 'del' ? a[i] : b[j]);
-    return out;
-  }
 
   // ---- blocks
   function shots(s) {
@@ -388,18 +363,6 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   const unitText = (u) => renderUnit(u).text;
   const unitHtml = (u) => renderUnit(u).html;
 
-  function blockOps(a, b) {
-    let s = 0, e = 0;
-    while (s < a.length && s < b.length && a[s] === b[s]) s++;
-    while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
-    const midA = a.slice(s, a.length - e), midB = b.slice(s, b.length - e);
-    if (midA.length * midB.length > 4e6) return null;
-    const ops = [];
-    for (let k = 0; k < s; k++) ops.push(['same', k, k]);
-    for (const [kind, i, j] of lcsOps(midA, midB)) ops.push([kind, i < 0 ? -1 : i + s, j < 0 ? -1 : j + s]);
-    for (let k = 0; k < e; k++) ops.push(['same', a.length - e + k, b.length - e + k]);
-    return ops;
-  }
   const byLine = (u) => u.type === 'front' || u.type === 'raw' || u.type === 'code';
   const linesOf = (u) => (u.type === 'code' ? u.token.text : u.raw.trim()).split('\n');
   // How much two blocks share: the pieces both contain, weighted by length, over the larger block. Pairing
