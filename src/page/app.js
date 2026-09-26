@@ -6,6 +6,8 @@ import { esc } from './lib/html.ts';
 import { hlLines, langOf } from './lib/highlight.ts';
 import { byLine, linesOf, markdownRows, MARKDOWN } from './lib/markdown.ts';
 import { fhash, fileShot, isViewedIn, sinceSeen, snapshot } from './lib/revisions.ts';
+import { reading } from './lib/reading.ts';
+import { summary as summaryOf } from './lib/summary.ts';
 
 // Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
 const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementById('review-boot').textContent);
@@ -514,31 +516,6 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   zoom.querySelector('.close').onclick = closeZoom;
   zoom.onclick = (e) => { if (e.target === zoom) closeZoom(); };
 
-  // ---- reading order: what a reviewer should meet first. The domain types a feature declares come
-  // first (they name everything downstream), then what stores them, then the logic, the edges it is
-  // reached through, the surface, and last the tests and generated files that only confirm the rest.
-  const ORDER = [
-    ['domain', 'Domain types'], ['data', 'Persistence'], ['logic', 'Logic'],
-    ['edge', 'Interfaces'], ['ui', 'Surface'], ['test', 'Tests'], ['config', 'Config and generated'],
-  ];
-  const entityFiles = (f) => new Set((f.entities || []).map(e => e.file).filter(Boolean));
-  function groupOf(f, path) {
-    if (/(^|[\/._-])(tests?|specs?|__tests__|__mocks__|fixtures?|snapshots?)([\/._-]|$)/i.test(path)) return 'test';
-    if (/(^|\/)(package-lock|bun\.lock|yarn\.lock|pnpm-lock|go\.sum|cargo\.lock)|\.(lock|ya?ml|toml|ini|cfg|env)$|(^|\/)(dockerfile|makefile)/i.test(path)) return 'config';
-    if (entityFiles(f).has(path)) return 'domain';
-    if (/(^|[\/._-])(entit|model|schema|domain|dto|types?)([\/._-]|$)/i.test(path)) return 'domain';
-    if (/(^|[\/._-])(repositor|store|dao|database|db|migrations?|quer|sql|prisma|persist)/i.test(path)) return 'data';
-    if (/(^|[\/._-])(route|router|api|endpoint|controller|cli|command|serve|server|middleware)/i.test(path)) return 'edge';
-    if (/\.(css|scss|sass|less|html|svg|vue|svelte)$|(^|[\/._-])(component|view|page|screen|style|ui)/i.test(path)) return 'ui';
-    return 'logic';
-  }
-  /** The feature's files, grouped and flattened into the order the rail and the arrows follow. */
-  function reading(f) {
-    const files = f.files || [];
-    const groups = ORDER.map(([key, label]) => ({ key, label, files: files.filter(x => groupOf(f, x.path) === key) })).filter(g => g.files.length);
-    return { groups, flat: groups.flatMap(g => g.files) };
-  }
-
   // ---- focus review: one file at a time, full screen, in that order
   const focus = document.getElementById('focus');
   let focusAt = -1;                                 // index into reading(current).flat, -1 when closed
@@ -702,21 +679,7 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   }
 
   // ---- output
-  function summary() {
-    const lines = [PLAN ? `## Plan review of ${data.pr.repo} — ${data.pr.title}` : `## Review of ${data.pr.repo}#${data.pr.number} at \`${data.pr.head}\``, ''];
-    data.features.forEach((f, i) => {
-      const s = state[f.id] || {};
-      const mark = s.decision === 'approved' ? '✅ Approved' : s.decision === 'changes' ? '❌ Changes requested' : '⬜ Not reviewed';
-      lines.push(`${i + 1}. **${f.title}** — ${mark}`);
-      if (s.note) lines.push(`   > ${s.note.replace(/\n/g, '\n   > ')}`);
-      for (const c of s.comments || []) {
-        lines.push(c.kind === 'line' ? `   - \`${c.file}:${c.line}\` — ${c.body}`
-          : c.kind === 'file' ? `   - \`${c.file}\` — ${c.body}`
-          : `   - "${c.quote.length > 80 ? c.quote.slice(0, 77) + '…' : c.quote}" — ${c.body}`);
-      }
-    });
-    return lines.join('\n');
-  }
+  const summary = () => summaryOf(data, state);
   document.getElementById('copy').onclick = async (e) => { await navigator.clipboard.writeText(summary()); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy review summary', 1500); };
   document.getElementById('export').onclick = () => {
     const blob = new Blob([JSON.stringify({ key, decisions: state }, null, 2)], { type: 'application/json' });
