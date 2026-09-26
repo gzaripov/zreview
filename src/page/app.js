@@ -1,9 +1,10 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
-import { blockOps, lcsOps, wordDiff } from './lib/diff.ts';
+import { lcsOps, wordDiff } from './lib/diff.ts';
 import { esc } from './lib/html.ts';
 import { hlLines, langOf } from './lib/highlight.ts';
+import { byLine, linesOf, markdownRows, MARKDOWN } from './lib/markdown.ts';
 import { fhash, fileShot, isViewedIn, sinceSeen, snapshot } from './lib/revisions.ts';
 
 // Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
@@ -225,47 +226,9 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
     }).join('');
   }
 
-  const MARKDOWN = /\.(md|markdown|mdx)$/i;
   const PURIFY = { FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'option'], FORBID_ATTR: ['style', 'form', 'formaction'] };
   let mdView = localStorage.getItem('zreview:mdview') || 'rendered';
   const richCache = new WeakMap(), richOpen = new Set();
-
-  function mdUnits(source, ref, dir) {
-    const text = source.replace(/\r\n?/g, '\n').replace(/^( *)(\t+)/gm, (_, s, t) => s + '    '.repeat(t.length));
-    const units = [];
-    let cursor = 0, pos = 0, line = 1;
-    const lineAt = (at) => { for (; pos < at; pos++) if (text.charCodeAt(pos) === 10) line++; return line; };
-    const span = (raw) => {
-      const at = Math.max(text.indexOf(raw, cursor), cursor);
-      cursor = at + raw.length;
-      return { from: lineAt(at), to: lineAt(at + Math.max(raw.trimEnd().length - 1, 0)) };
-    };
-    const unit = (type, raw, key, extra) => units.push({ type, raw, key, ref, dir, ...extra, ...span(raw) });
-    const front = /^---\n[\s\S]*?\n---[ \t]*(?:\n|$)/.exec(text);
-    if (front) unit('front', front[0], 'front\n' + front[0].trim());
-    for (const t of marked.lexer(text.slice(cursor))) {
-      if (t.type === 'space') { span(t.raw); continue; }
-      if (t.type !== 'list') { unit(t.type, t.raw, `${t.type}${t.depth ?? ''}\n${t.raw.trim()}`, { token: t }); continue; }
-      const at = Math.max(text.indexOf(t.raw, cursor), cursor);
-      cursor = at;
-      for (const item of t.items) unit('item', item.raw, `item${t.ordered ? 1 : ''}\n${item.raw.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim()}`, { list: t, item });
-      cursor = Math.max(cursor, at + t.raw.length);
-    }
-    // marked keeps some source out of every token: a link reference definition (`[docs]: https://…`) sets
-    // the target of every `[docs]` without a block of its own. A change there would not show in the rendered
-    // view at all, so each run of non-blank lines that no block covers becomes a block of its own.
-    const lines = text.split('\n'), covered = new Uint8Array(lines.length + 2), loose = [];
-    for (const u of units) for (let n = u.from; n <= u.to; n++) covered[n] = 1;
-    for (let n = 1; n <= lines.length; n++) {
-      if (covered[n] || !lines[n - 1].trim()) continue;
-      let m = n;
-      while (m < lines.length && !covered[m + 1] && lines[m].trim()) m++;
-      const raw = lines.slice(n - 1, m).join('\n');
-      loose.push({ type: 'raw', raw, key: `raw\n${raw.trim()}`, ref, dir, from: n, to: m });
-      n = m;
-    }
-    return loose.length ? [...units, ...loose].sort((x, y) => x.from - y.from) : units;
-  }
 
   function resolveLinks(root, ref, dir) {
     const fix = (el, attr, kind) => {
@@ -297,57 +260,11 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   const unitText = (u) => renderUnit(u).text;
   const unitHtml = (u) => renderUnit(u).html;
 
-  const byLine = (u) => u.type === 'front' || u.type === 'raw' || u.type === 'code';
-  const linesOf = (u) => (u.type === 'code' ? u.token.text : u.raw.trim()).split('\n');
-  // How much two blocks share: the pieces both contain, weighted by length, over the larger block. Pairing
-  // asks this of every removed and added block in a changed stretch, so it counts instead of aligning:
-  // linear in the blocks' size, where a word-level LCS per pair could freeze the tab on a long rewrite.
-  function overlap(a, b) {
-    const left = new Map(); let sizeA = 0, sizeB = 0, same = 0;
-    for (const t of a) { left.set(t, (left.get(t) || 0) + 1); sizeA += t.length; }
-    for (const t of b) { sizeB += t.length; const k = left.get(t); if (k) { left.set(t, k - 1); same += t.length; } }
-    return same / Math.max(sizeA, sizeB, 1);
-  }
-  function likeness(o, n) {
-    if (o.type !== n.type || o.token?.depth !== n.token?.depth || (o.type === 'item' && o.list.ordered !== n.list.ordered)) return 0;
-    if (o.type === 'table' && (o.token.header.length !== n.token.header.length || o.token.rows.length !== n.token.rows.length)) return 0;
-    if (byLine(o)) {
-      const a = linesOf(o), b = linesOf(n);
-      return a.join('\n') === b.join('\n') ? 0 : overlap(a, b);
-    }
-    // Adjacent word pairs, not words: two unrelated paragraphs share most of their small words, but few
-    // of their word pairs, so a rewrite still reads as removed then added.
-    const a = unitText(o), b = unitText(n);
-    const pairs = (t) => { const w = t.split(/\s+/).filter(Boolean); return w.length < 2 ? w : w.slice(1).map((x, i) => `${w[i]} ${x}`); };
-    return a === b ? 0 : overlap(pairs(a), pairs(b));
-  }
-  function pairUp(ops, a, b) {
-    const out = [];
-    for (let k = 0; k < ops.length;) {
-      if (ops[k][0] === 'same') { out.push({ kind: 'same', old: a[ops[k][1]], new: b[ops[k][2]] }); k++; continue; }
-      const gone = [], come = [];
-      for (; k < ops.length && ops[k][0] !== 'same'; k++) ops[k][0] === 'del' ? gone.push(a[ops[k][1]]) : come.push(b[ops[k][2]]);
-      let next = 0;
-      for (const o of gone) {
-        let best = -1, score = 0.5;
-        if (gone.length * come.length <= 400) for (let y = next; y < come.length; y++) { const s = likeness(o, come[y]); if (s > score) { best = y; score = s; } }
-        if (best < 0) { out.push({ kind: 'del', old: o }); continue; }
-        for (; next < best; next++) out.push({ kind: 'add', new: come[next] });
-        out.push({ kind: 'mod', old: o, new: come[next++] });
-      }
-      for (; next < come.length; next++) out.push({ kind: 'add', new: come[next] });
-    }
-    return out;
-  }
   function richModel(file) {
     if (richCache.has(file)) return richCache.get(file);
     let model = null;
-    try {
-      const dir = file.path.slice(0, file.path.lastIndexOf('/') + 1);
-      const a = mdUnits(file.text.before, data.pr.base, dir), b = mdUnits(file.text.after, data.pr.head, dir);
-      const ops = blockOps(a.map(u => u.key), b.map(u => u.key));
-      if (ops) model = pairUp(ops, a, b);
-    } catch (e) { console.error(`zreview: could not render ${file.path}`, e); }
+    try { model = markdownRows(file, data.pr.base, data.pr.head, unitText); }
+    catch (e) { console.error(`zreview: could not render ${file.path}`, e); }
     richCache.set(file, model);
     return model;
   }
