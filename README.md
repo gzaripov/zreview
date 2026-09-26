@@ -22,10 +22,10 @@ the diff and the PR metadata.
 curl -fsSL https://raw.githubusercontent.com/gzaripov/zreview/main/install.sh | bash
 ```
 
-That clones to `~/code/zreview`, installs its dependencies from the lockfile,
-puts `zreview` and `zplan` on PATH with `bun link`, and installs the agent
-skill where both Claude Code and omp load it. Re-run it to update. From a
-checkout, `./install.sh` does the same.
+That clones to `~/code/zreview`, installs Mermaid with `bun install`, puts
+`zreview` and `zplan` on PATH with `bun link`, and installs the agent skill
+where both Claude Code and omp load it. Re-run it to update. From a checkout,
+`./install.sh` does the same.
 
 Manually:
 
@@ -171,7 +171,7 @@ Exit code is `0` unless you ask for it to mean something:
 |---|---|
 | default | `0` for any outcome |
 | `--require-approval` | `0` approved, `1` anything else |
-| always | `2` when zreview could not run: bad `review.json`, missing screenshot, existing `--result-file` |
+| always | `2` when zreview could not run: bad `review.json`, a diagram Mermaid cannot parse, missing screenshot, existing `--result-file` |
 
 The `2` fires before any server starts, so a bad invocation never opens a tab.
 
@@ -245,6 +245,10 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
         { "title": "At the byte ceiling", "note": "65,536 bytes exactly; one more is rejected before parsing.", "value": { "momo": 1, "kind": "spinoff", "title": "…", "words": [] } } ] } ]
   ```
 
+- `diagrams` are Mermaid. zreview parses each one with the Mermaid version the
+  page renders it with, pinned in `package.json`. If one fails, zreview exits
+  `2` naming the feature, the diagram and Mermaid's parse error, before any tab
+  opens. That way a diagram never reaches the reviewer as a syntax error.
 - `screenshots` is `null` when the feature has no user-visible surface; the
   page says so rather than leaving a blank. Paths are relative to `review.json`.
 - `files` are hashed into `#diff-<sha256>` links into the PR's Files tab and
@@ -268,8 +272,9 @@ as PNG. Nothing is ever upscaled. A real phone screen inlines at roughly 100 KB.
 src/cli.ts        the contract: flags, stdout, exit codes
 src/serve.ts      localhost server; resolves on Submit or tab close
 src/build.ts      review.json → HTML; diff parsing; screenshot inlining
+src/diagrams.ts   parses each diagram with the Mermaid the page renders it with
 src/page/         index.html, style.css, app.js — inlined into one file at build
 skill/SKILL.md    the agent skill; install.sh links it into ~/.claude/skills
 ```
 
-Bun only, no dependencies. MIT.
+Bun, plus one dependency: Mermaid, to check the diagrams. MIT.

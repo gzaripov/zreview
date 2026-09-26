@@ -11,7 +11,7 @@ import { $ } from "bun";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { validateDiagrams } from "./mermaid.ts";
+import { diagramError, mermaidVersion } from "./diagrams.ts";
 
 export type Shots = { before?: string; after?: string; caption?: string; before_src?: string; after_src?: string };
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
@@ -149,13 +149,23 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
         else if (!("value" in x)) problems.push(`${where} example ${x.title}: needs a value, the serialized instance`);
       });
     }
+    for (const [i, d] of (f.diagrams ?? []).entries()) {
+      const where = `feature ${f.id} diagram ${d?.title || i + 1}`;
+      if (typeof d?.mermaid !== "string" || !d.mermaid.trim()) {
+        problems.push(`${where}: needs mermaid, the diagram source`);
+        continue;
+      }
+      const error = await diagramError(d.mermaid).catch((e: Error) => {
+        throw new ReviewError(`${path}: cannot check the diagrams — ${e.message}`);
+      });
+      if (error) problems.push(`${where}: Mermaid ${mermaidVersion} cannot parse it — ${error.replaceAll("\n", "\n    ")}`);
+    }
   }
   if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} in the features:\n  ${problems.join("\n  ")}`);
   return review;
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
   const review = await loadReview(reviewPath, opts.plan);
-  await validateDiagrams(review, reviewPath);
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;
@@ -187,6 +197,7 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   );
   const html = index
     .replace("__TITLE__", `Review: ${review.pr.repo}#${review.pr.number}`)
+    .replace("__MERMAID__", mermaidVersion)
     .replace("__STYLE__", () => style)
     .replace("__SERVED__", String(opts.served))
     // A served page keeps the token: serve() fills in the state it holds on every request, so a reload
