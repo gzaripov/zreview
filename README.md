@@ -281,10 +281,25 @@ as PNG. Nothing is ever upscaled. A real phone screen inlines at roughly 100 KB.
 ```
 src/cli.ts        the contract: flags, stdout, exit codes
 src/serve.ts      localhost server; resolves on Submit or tab close
-src/build.ts      review.json → HTML; diff parsing; screenshot inlining
+src/build.ts      review.json → HTML; diff parsing; screenshot inlining; bundles the page
 src/diagrams.ts   parses each diagram with the Mermaid the page renders it with
-src/page/         index.html, style.css, app.js — inlined into one file at build
+src/page/         index.html and style.css; app.js, bundled by Bun into the one page
+src/page/lib/     what the page computes without a DOM: diffs, revisions, the Markdown
+                  block model, reading order, the summary — each with its tests
+test/e2e/         one reviewer session driven in Chrome against a real run
 skill/SKILL.md    the agent skill; install.sh links it into ~/.claude/skills
 ```
 
-Bun, plus one dependency: Mermaid, to check the diagrams. MIT.
+Bun, plus Mermaid (to check the diagrams) and the page's libraries: marked,
+DOMPurify, highlight.js. MIT.
+
+## Develop
+
+```bash
+bun install
+bun test src      # unit tests, offline, a second
+bun run e2e       # a real review in Chrome: needs Google Chrome and the network (Mermaid, Monaco from the CDN)
+```
+
+The page is bundled on every run — a few milliseconds — so an edit under
+`src/page/` shows on the next `zreview review` or `zreview build`.
