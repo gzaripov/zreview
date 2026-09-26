@@ -336,7 +336,20 @@
       for (const item of t.items) unit('item', item.raw, `item${t.ordered ? 1 : ''}\n${item.raw.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim()}`, { list: t, item });
       cursor = Math.max(cursor, at + t.raw.length);
     }
-    return units;
+    // marked keeps some source out of every token: a link reference definition (`[docs]: https://…`) sets
+    // the target of every `[docs]` without a block of its own. A change there would not show in the rendered
+    // view at all, so each run of non-blank lines that no block covers becomes a block of its own.
+    const lines = text.split('\n'), covered = new Uint8Array(lines.length + 2), loose = [];
+    for (const u of units) for (let n = u.from; n <= u.to; n++) covered[n] = 1;
+    for (let n = 1; n <= lines.length; n++) {
+      if (covered[n] || !lines[n - 1].trim()) continue;
+      let m = n;
+      while (m < lines.length && !covered[m + 1] && lines[m].trim()) m++;
+      const raw = lines.slice(n - 1, m).join('\n');
+      loose.push({ type: 'raw', raw, key: `raw\n${raw.trim()}`, ref, dir, from: n, to: m });
+      n = m;
+    }
+    return loose.length ? [...units, ...loose].sort((x, y) => x.from - y.from) : units;
   }
 
   function resolveLinks(root, ref, dir) {
@@ -350,7 +363,7 @@
   }
   function renderUnit(u) {
     if (u.html !== undefined) return u;
-    const html = u.type === 'front' ? `<pre class="rd-front"><code>${esc(u.raw.trim())}</code></pre>`
+    const html = u.type === 'front' || u.type === 'raw' ? `<pre class="rd-${u.type}"><code>${esc(u.raw.trim())}</code></pre>`
       : marked.parser([u.type === 'item' ? { ...u.list, items: [u.item] } : u.token]);
     const box = document.createElement('div');
     box.innerHTML = DOMPurify.sanitize(html, PURIFY);
@@ -381,8 +394,8 @@
     for (let k = 0; k < e; k++) ops.push(['same', a.length - e + k, b.length - e + k]);
     return ops;
   }
-  const byLine = (u) => u.type === 'front' || u.type === 'code';
-  const linesOf = (u) => (u.type === 'front' ? u.raw.trim() : u.token.text).split('\n');
+  const byLine = (u) => u.type === 'front' || u.type === 'raw' || u.type === 'code';
+  const linesOf = (u) => (u.type === 'code' ? u.token.text : u.raw.trim()).split('\n');
   function likeness(o, n) {
     if (o.type !== n.type || o.token?.depth !== n.token?.depth || (o.type === 'item' && o.list.ordered !== n.list.ordered)) return 0;
     if (o.type === 'table' && (o.token.header.length !== n.token.header.length || o.token.rows.length !== n.token.rows.length)) return 0;
@@ -454,7 +467,7 @@
     }
   }
   function lineDiffHtml(o, n) {
-    const lang = n.type === 'front' ? 'yaml' : (n.token.lang || '').split(/\s/)[0];
+    const lang = n.type === 'front' ? 'yaml' : n.type === 'raw' ? 'markdown' : (n.token.lang || '').split(/\s/)[0];
     const known = window.hljs?.getLanguage(lang) ? lang : null;
     const a = linesOf(o), b = linesOf(n), ha = hlLines(a.join('\n'), known), hb = hlLines(b.join('\n'), known);
     return `<pre class="rd-lines"><code>${lcsOps(a, b).map(([kind, i, j]) => `<span class="ln ${kind}">${kind === 'del' ? ha[i] : hb[j]}</span>`).join('')}</code></pre>`;
