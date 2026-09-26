@@ -293,8 +293,13 @@
     const cs = entry(f.id).comments.filter(c => c.kind === 'line' && c.file === file.path);
     const lang = langOf(file.path);
     const fresh = sinceOf(f).files[file.path]?.fresh;        // lines the reviewer has not seen
+    // A comment on a line no row below shows is listed above the rows instead of vanishing: one made on an
+    // unchanged block in the rendered view, or one whose line the author's rework moved out of the diff.
+    const rows = new Set(file.hunks.flatMap(h => h.lines.map(l => l.t === '-' ? `old ${l.old}` : `new ${l.new}`)));
+    const outside = cs.filter(c => !rows.has(`${c.side} ${c.line}`)).map(c =>
+      `<div class="lc outside"><div class="who">${c.side === 'old' ? 'old ' : ''}line ${c.line}, outside the diff<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
     let fi = 0;
-    return file.hunks.map(h => {
+    return outside + file.hunks.map(h => {
       const oh = hlLines(h.lines.filter(l => l.t !== '+').map(l => l.text).join('\n'), lang);
       const nh = hlLines(h.lines.filter(l => l.t !== '-').map(l => l.text).join('\n'), lang);
       let oi = 0, ni = 0;

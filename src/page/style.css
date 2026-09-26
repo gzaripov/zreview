@@ -253,6 +253,7 @@ body.zoomed { overflow: hidden; }
 .hljs-deletion { color: var(--bad); }
 .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
 .lc { margin: 4px 8px 8px 6.8em; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 4px; background: var(--bg); font-family: -apple-system, system-ui, sans-serif; font-size: 13px; }
+.lc.outside { margin: 10px 12px; }
 .lc .who, .cm .who { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .lc .who button, .cm .who button { border: 0; background: none; color: var(--muted); padding: 0; font-size: 11px; }
 
