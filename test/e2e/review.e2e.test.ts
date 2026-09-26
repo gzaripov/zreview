@@ -61,7 +61,8 @@ let browser: Browser;
 beforeAll(async () => { browser = await chromium.launch({ channel: "chrome" }); });
 afterAll(async () => { await browser?.close(); });
 
-test("a review from the first look to Submit", async () => {
+// Opt-in: needs Chrome and the network and takes ~10 s, so a bare `bun test` must not pick it up.
+test.skipIf(!process.env.ZREVIEW_E2E)("a review from the first look to Submit", async () => {
   const run = await startReview();
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors: string[] = [];

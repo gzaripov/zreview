@@ -22,9 +22,10 @@ the diff and the PR metadata.
 curl -fsSL https://raw.githubusercontent.com/gzaripov/zreview/main/install.sh | bash
 ```
 
-That clones to `~/code/zreview`, installs Mermaid with `bun install`, puts
-`zreview` and `zplan` on PATH with `bun link`, and installs the agent skill
-where both Claude Code and omp load it. Re-run it to update. From a checkout,
+That clones to `~/code/zreview`, installs the dependencies (Mermaid, to check
+the diagrams, and the page's libraries) with `bun install`, puts `zreview`
+and `zplan` on PATH with `bun link`, and installs the agent skill where both
+Claude Code and omp load it. Re-run it to update. From a checkout,
 `./install.sh` does the same.
 
 Manually:

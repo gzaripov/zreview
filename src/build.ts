@@ -113,7 +113,9 @@ async function bundlePage(): Promise<string> {
     throw fail(e instanceof AggregateError ? e.errors.map(String) : [String(e)]);
   }
   if (!result.success) throw fail(result.logs.map(String));
-  return result.outputs[0].text();
+  const text = await result.outputs[0].text();
+  // Without a name, a stack trace from the page shows its ~350 KB data: URL instead of a file name.
+  return `${text}\n//# sourceURL=zreview-page.js`;
 }
 
 export function beforeAndAfter(after: string, hunks: Hunk[]): { before: string; after: string } | undefined {
@@ -239,6 +241,9 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[]; stateSlot: string }> {
   const review = await loadReview(reviewPath, opts.plan);
+  // Started here, before the screenshot and Markdown-fetch work below, so a checkout missing its
+  // dependencies (mermaid, the page's libraries) fails fast instead of after minutes of network calls.
+  const pageBundle = pageScript();
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;
@@ -266,16 +271,21 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   const texts = new Map<string, Promise<FileRef["text"]>>();
   // A docs PR can change hundreds of Markdown files: fetch six at a time, not one gh process for each at once.
   const headText = opts.headText && limited(6, opts.headText);
-  await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
-    if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
-    if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, headText));
-    ref.text = await texts.get(ref.path);
-    if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
-  })));
+  try {
+    await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
+      if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
+      if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, headText));
+      ref.text = await texts.get(ref.path);
+      if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
+    })));
+  } catch (e) {
+    pageBundle.catch(() => {});  // this is the real error; don't let the bundle's rejection surface too
+    throw e;
+  }
   const payload = inlineJson(review);
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all([
-    Bun.file(join(page, "index.html")).text(), Bun.file(join(page, "style.css")).text(), pageScript(),
+    Bun.file(join(page, "index.html")).text(), Bun.file(join(page, "style.css")).text(), pageBundle,
   ]);
   // One pass over index.html: what goes in for one placeholder is never read as another, whatever the diff
   // quotes. A served page gets a marker for its state that only this build knows; serve() fills it in on

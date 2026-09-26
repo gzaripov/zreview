@@ -9,7 +9,7 @@
     "review": "bun run src/cli.ts review",
     "build": "bun run src/cli.ts build",
     "test": "bun test src",
-    "e2e": "bun test test/e2e --timeout 120000"
+    "e2e": "ZREVIEW_E2E=1 bun test test/e2e --timeout 120000"
   },
   "engines": { "bun": ">=1.2" },
   "dependencies": { "dompurify": "3.2.7", "highlight.js": "11.11.1", "marked": "12.0.2", "mermaid": "11.4.1" },
