@@ -280,6 +280,15 @@ body.zoomed { overflow: hidden; }
 .decide textarea { width: 100%; margin-top: 12px; min-height: 64px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; resize: vertical; }
 .decide .state { font-size: 13px; color: var(--muted); }
 
+/* A reworked passage, before and after */
+.sbs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.sbs > div { min-width: 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); }
+.sbs .was { border-left-color: var(--bad); color: var(--muted); }
+.sbs .now { border-left-color: var(--ok); }
+.sbs .lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.scenario .sbs .lbl { font-size: 11px; }
+@media (max-width: 1000px) { .sbs { grid-template-columns: minmax(0, 1fr); } }
+
 @media (max-width: 800px) {
   .layout { grid-template-columns: 1fr; }
   aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
