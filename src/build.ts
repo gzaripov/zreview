@@ -11,13 +11,13 @@ import { $ } from "bun";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { validateDiagrams } from "./mermaid.ts";
+import { diagramError, mermaidVersion } from "./diagrams.ts";
 
 export type Shots = { before?: string; after?: string; caption?: string; before_src?: string; after_src?: string };
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
 export type Hunk = { header: string; lines: DiffLine[] };
 export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
-export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string };
+export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string; text?: { before: string; after: string } };
 /** A field is what an entity consists of; an operation is what you can do with it. Both carry the reasoning, not just the type. */
 export type Part = { name: string; type?: string; meaning: string; why?: string; change?: "added" | "changed" | "removed" };
 export type Entity = {
@@ -49,7 +49,10 @@ export type Review = {
   pr: { repo: string; number?: number; url?: string; title: string; base?: string; head?: string; exposure?: string };
   features: Feature[];
 };
-export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean };
+export type BuildOptions = {
+  maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean;
+  headText?: (path: string) => Promise<string | undefined>;
+};
 
 /** Parse a unified diff (git / `gh pr diff`) into per-file hunks with old and new line numbers. */
 export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
@@ -82,6 +85,54 @@ export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
 }
 
 export class ReviewError extends Error {}
+
+export const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
+
+/** JSON to put inside a <script>. Every `<` is escaped: `</script` would end the element early, and `<!--`
+ *  followed by `<script` would hide the element's own `</script>` from the HTML parser. JSON.parse and JS
+ *  both read `\u003c` back as `<`. */
+export const inlineJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
+export function beforeAndAfter(after: string, hunks: Hunk[]): { before: string; after: string } | undefined {
+  const next = after.split("\n"), prev: string[] = [], last = hunks.at(-1)?.lines.at(-1);
+  let at = 0;
+  for (const h of hunks) {
+    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(h.header);
+    if (!m) return undefined;
+    const start = m[2] === "0" ? Number(m[1]) : Number(m[1]) - 1;
+    if (start < at) return undefined;
+    prev.push(...next.slice(at, start));
+    at = start;
+    for (const l of h.lines) {
+      if (l === last && l.t === " " && l.text === "" && next[at] !== "") break;
+      if (l.t !== "+") prev.push(l.text);
+      if (l.t !== "-") { if (next[at] !== l.text) return undefined; at++; }
+    }
+  }
+  prev.push(...next.slice(at));
+  return { before: prev.join("\n"), after };
+}
+
+/** At most `n` calls of `fn` in flight. A finishing call hands its slot straight to the next waiting one. */
+function limited<A extends unknown[], R>(n: number, fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (...args) => {
+    if (active < n) active++;
+    else await new Promise<void>((go) => waiting.push(go));
+    try { return await fn(...args); }
+    finally { const next = waiting.shift(); if (next) next(); else active--; }
+  };
+}
+
+async function markdownText(ref: FileRef, headText: BuildOptions["headText"]): Promise<FileRef["text"]> {
+  const side = (skip: string) => ref.hunks!.flatMap((h) => h.lines.filter((l) => l.t !== skip).map((l) => l.text)).join("\n");
+  if (ref.status === "added") return { before: "", after: side("-") };
+  if (ref.status === "deleted") return { before: side("+"), after: "" };
+  const after = await headText?.(ref.path);
+  return after === undefined ? undefined : beforeAndAfter(after, ref.hunks!);
+}
 
 async function pixelWidth(path: string): Promise<number | null> {
   const out = await $`sips -g pixelWidth ${path}`.quiet().nothrow();
@@ -149,13 +200,23 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
         else if (!("value" in x)) problems.push(`${where} example ${x.title}: needs a value, the serialized instance`);
       });
     }
+    for (const [i, d] of (f.diagrams ?? []).entries()) {
+      const where = `feature ${f.id} diagram ${d?.title || i + 1}`;
+      if (typeof d?.mermaid !== "string" || !d.mermaid.trim()) {
+        problems.push(`${where}: needs mermaid, the diagram source`);
+        continue;
+      }
+      const error = await diagramError(d.mermaid).catch((e: Error) => {
+        throw new ReviewError(`${path}: cannot check the diagrams — ${e.message}`);
+      });
+      if (error) problems.push(`${where}: Mermaid ${mermaidVersion} cannot parse it — ${error.replaceAll("\n", "\n    ")}`);
+    }
   }
   if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} in the features:\n  ${problems.join("\n  ")}`);
   return review;
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
   const review = await loadReview(reviewPath, opts.plan);
-  await validateDiagrams(review, reviewPath);
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;
@@ -180,19 +241,29 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     ];
     if (problems.length) throw new ReviewError(`${reviewPath}: ${problems.length} file${problems.length === 1 ? "" : "s"} out of step with the PR:\n  ${problems.join("\n  ")}`);
   }
-  const payload = JSON.stringify(review).replaceAll("</", "<\\/");
+  const texts = new Map<string, Promise<FileRef["text"]>>();
+  // A docs PR can change hundreds of Markdown files: fetch six at a time, not one gh process for each at once.
+  const headText = opts.headText && limited(6, opts.headText);
+  await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
+    if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
+    if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, headText));
+    ref.text = await texts.get(ref.path);
+    if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
+  })));
+  const payload = inlineJson(review);
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all(
     ["index.html", "style.css", "app.js"].map((name) => Bun.file(join(page, name)).text()),
   );
-  const html = index
-    .replace("__TITLE__", `Review: ${review.pr.repo}#${review.pr.number}`)
-    .replace("__STYLE__", () => style)
-    .replace("__SERVED__", String(opts.served))
-    // A served page keeps the token: serve() fills in the state it holds on every request, so a reload
-    // shows what the reviewer has done rather than what existed when the process started.
-    .replace("__STATE__", () => (opts.served ? "__STATE__" : "null"))
-    .replace("__REVIEW_JSON__", () => payload)
-    .replace("__APP__", () => app);
-  return { html, review, log };
+  // One pass over index.html: what goes in for one placeholder is never read as another, whatever the diff
+  // quotes. A served page gets a marker for its state that only this build knows; serve() fills it in on
+  // every request, so a reload shows what the reviewer has done rather than what existed at startup.
+  const stateSlot = opts.served ? `__STATE_${randomUUID().replaceAll("-", "")}__` : "null";
+  const title = review.plan ? `Plan: ${review.pr.repo} — ${review.pr.title}` : `Review: ${review.pr.repo}#${review.pr.number}`;
+  const values: Record<string, string> = {
+    TITLE: escapeHtml(title), MERMAID: mermaidVersion, STYLE: style, SERVED: String(opts.served),
+    STATE: stateSlot, REVIEW_JSON: payload, APP: app,
+  };
+  const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP)__/g, (_, key: string) => values[key]!);
+  return { html, review, log, stateSlot };
 }

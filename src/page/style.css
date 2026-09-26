@@ -56,9 +56,10 @@ main { padding: 28px 40px 80px; max-width: 1500px; }
 .scenario, .prose, .esum { max-width: 860px; }
 main h2 { font-size: 24px; margin: 0 0 6px; }
 .section { margin-top: 28px; }
-.section h3 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
-.section h3 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
-.section h3 .sub.all { color: var(--ok); }
+/* Only the page's own section labels: a heading inside rendered Markdown or a description is the document's. */
+.section > h3 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.section > h3 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+.section > h3 .sub.all { color: var(--ok); }
 .focusbtn { margin-left: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--fg); font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; }
 .focusbtn:hover { border-color: var(--accent); color: var(--accent); }
 .scenario { font-size: 17px; padding: 14px 18px; border-left: 3px solid var(--accent); background: var(--panel); border-radius: 0 6px 6px 0; }
@@ -79,10 +80,10 @@ figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .since .hl input { margin: 0; }
 .since .seen { padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .since .seen:hover { border-color: var(--accent); }
-.section h3 .sub.upd { color: var(--warn); border: 1px solid var(--warn); border-radius: 10px; padding: 0 7px; }
+.section > h3 .sub.upd { color: var(--warn); border: 1px solid var(--warn); border-radius: 10px; padding: 0 7px; }
 .wd { white-space: pre-wrap; }
-.wd ins { background: var(--add-bg); color: var(--ok); text-decoration: none; border-radius: 3px; padding: 1px 3px; box-shadow: inset 0 -1px 0 var(--ok); }
-.wd del { background: var(--del-bg); color: var(--bad); border-radius: 3px; padding: 1px 3px; margin-right: 3px; }
+.wd ins, .rd ins { background: var(--add-bg); color: var(--ok); text-decoration: none; border-radius: 3px; padding: 1px 3px; box-shadow: inset 0 -1px 0 var(--ok); }
+.wd del, .rd del { background: var(--del-bg); color: var(--bad); border-radius: 3px; padding: 1px 3px; margin-right: 3px; }
 .entity.moved { border-color: var(--warn); }
 .entity .upd { font-size: 11px; color: var(--warn); border: 1px solid var(--warn); border-radius: 10px; padding: 0 7px; background: var(--hl); white-space: nowrap; }
 .dl.fresh .g { background: var(--hl); color: var(--warn); font-weight: 700; box-shadow: inset 3px 0 0 var(--warn); }
@@ -110,7 +111,7 @@ figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .focus .rlist .c { flex: none; font-size: 11px; color: var(--warn); }
 .focus .rkeys { margin-top: 18px; padding: 12px 6px 0; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); display: grid; gap: 5px; }
 .focus kbd { font-family: ui-monospace, Menlo, monospace; font-size: 10px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--bg); }
-.focus .stage { display: flex; flex-direction: column; min-width: 0; }
+.focus .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .focus .progress { height: 3px; background: var(--line); flex: none; }
 .focus .progress span { display: block; height: 100%; background: var(--ok); transition: width .18s; }
 .focus .bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
@@ -158,6 +159,43 @@ body.zoomed { overflow: hidden; }
 .file.seen > .fh .path { color: var(--muted); }
 .file > .fh .tri { color: var(--muted); width: 1em; }
 .hunk { border-top: 1px solid var(--line); }
+.mdview { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.mdview button, .focus .bar .mdview button { border: 0; border-radius: 0; padding: 2px 9px; background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 600; }
+.focus .bar .mdview button { padding: 5px 10px; font-size: 12px; }
+.mdview button + button, .focus .bar .mdview button + button { border-left: 1px solid var(--line); }
+.mdview button.on, .focus .bar .mdview button.on { background: var(--accent); color: #fff; }
+.mdview button:disabled { opacity: .45; cursor: default; }
+.rd { padding: 16px 24px 12px 32px; line-height: 1.6; overflow-wrap: anywhere; }
+.rd-u { position: relative; margin: 0 -10px 10px; padding: 3px 10px; border-radius: 4px; }
+.rd-u > :not(.rc) { margin-top: 0; margin-bottom: 0; }
+.rd-u.t-heading { margin-top: 22px; }
+.rd-u.add { background: var(--add-bg); box-shadow: inset 3px 0 0 var(--ok); }
+.rd-u.del { background: var(--del-bg); box-shadow: inset 3px 0 0 var(--bad); }
+.rd-u.mod { box-shadow: inset 3px 0 0 var(--accent); }
+.rd-u.fresh::after { content: "●"; position: absolute; left: -17px; top: 4px; font-size: 9px; color: var(--warn); }
+.rd-u > .rc { position: absolute; top: 3px; right: 3px; z-index: 1; width: 22px; height: 22px; padding: 0; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg); color: var(--accent); font-weight: 700; line-height: 1; opacity: 0; }
+.rd-u:hover > .rc, .rd-u > .rc:focus-visible { opacity: 1; }
+.rd ul, .rd ol { margin: 0 0 10px; padding-left: 2em; }
+.rd li.rd-u { margin: 0 0 2px; padding: 1px 8px; }
+.rd h1, .rd h2, .rd h3, .rd h4, .rd h5, .rd h6 { line-height: 1.25; }
+.rd h1, .rd h2 { padding-bottom: .3em; border-bottom: 1px solid var(--line); }
+.rd h1 { font-size: 1.75em; } .rd h2 { font-size: 1.4em; } .rd h3 { font-size: 1.15em; } .rd h4, .rd h5, .rd h6 { font-size: 1em; }
+.rd blockquote { padding: 0 1em; color: var(--muted); border-left: .25em solid var(--line); }
+.rd table { border-collapse: collapse; display: block; max-width: 100%; overflow: auto; }
+.rd th, .rd td { border: 1px solid var(--line); padding: 5px 12px; }
+.rd img { max-width: 100%; }
+.rd hr { border: 0; border-top: 2px solid var(--line); }
+.rd pre { margin: 0; }
+.rd-front, .rd-raw { color: var(--muted); font-size: 12px; }
+.rd-note { padding: 8px 12px; margin: 0; }
+.rd-lines code { line-height: 1.5; }
+.rd-lines .ln { display: block; min-height: 1.5em; margin: 0 -12px; padding: 0 12px; }
+.rd-lines .ln.del { background: var(--del-bg); box-shadow: inset 3px 0 0 var(--bad); }
+.rd-lines .ln.ins { background: var(--add-bg); box-shadow: inset 3px 0 0 var(--ok); }
+.rd-more { display: block; width: 100%; margin: 0 0 10px; padding: 5px; border: 1px dashed var(--line); border-radius: 4px; background: var(--panel); color: var(--muted); font-size: 12px; }
+.rd-more:hover { color: var(--fg); border-color: var(--accent); }
+.rd .lc, .rd .composer { margin: 6px 0 10px; }
+.rd ins, .rd del { padding: 0 1px; margin-right: 0; }
 
 /* Entities */
 .entity { border: 1px solid var(--line); border-left-width: 3px; border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; }
@@ -215,6 +253,7 @@ body.zoomed { overflow: hidden; }
 .hljs-deletion { color: var(--bad); }
 .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
 .lc { margin: 4px 8px 8px 6.8em; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 4px; background: var(--bg); font-family: -apple-system, system-ui, sans-serif; font-size: 13px; }
+.lc.outside { margin: 10px 12px; }
 .lc .who, .cm .who { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .lc .who button, .cm .who button { border: 0; background: none; color: var(--muted); padding: 0; font-size: 11px; }
 

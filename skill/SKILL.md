@@ -85,10 +85,13 @@ tell a domain entity from `CodingKeys`. That judgment is yours.
 
 **`diagrams`** — Mermaid, when the feature changes control flow, state,
 persistence, or a component boundary. Names from the code; no fictional
-services. Leave empty when nothing moved — the page says so. Every diagram is
-parsed before the page opens; one that does not parse is exit `2` naming the
-feature, the diagram and the line. Quote labels that contain `(`, `;`, `=` or
-`:`, as in `A["fetch(id)"]`.
+services. Leave empty when nothing moved — the page says so. zreview parses
+every diagram with the Mermaid version the page renders it with. A diagram
+that fails is exit `2` naming the feature, the diagram and the parse error,
+before any tab opens. Fix the diagram it names. Do not drop the diagram to
+get past the check. In a flowchart, quote a label that contains `(`, `;`, `=` or `:`, as in
+`A["fetch(id)"]`. A state transition label takes one colon: `a --> b: publish`,
+not `a --> b: resolved: publish`.
 
 **`screenshots`** — when a user could see the change. A modification gets
 **before and after**. Render the before from the code you replaced, under the
