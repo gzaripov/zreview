@@ -3,10 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<base target="_blank">
 <title>__TITLE__</title>
+<script>
+  // Before first paint: the saved choice wins, else the OS setting. The app's toggle updates both.
+  document.documentElement.dataset.theme = localStorage.getItem('zreview:theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+</script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
 <style>
 __STYLE__
 </style>
@@ -15,6 +21,7 @@ __STYLE__
 <script id="review-data" type="application/json">__REVIEW_JSON__</script>
 <div class="layout">
   <aside>
+    <button id="theme" class="theme" type="button" title="Switch theme"></button>
     <h1 id="pr-title"></h1>
     <div class="meta" id="pr-meta"></div>
     <div class="exposure" id="pr-exposure"></div>
@@ -30,6 +37,34 @@ __STYLE__
   <main id="main"></main>
 </div>
 <button id="selbtn" class="selbtn" hidden>Comment</button>
+<div id="focus" class="focus" hidden role="dialog" aria-label="Focus review">
+  <div class="rail">
+    <div class="rhead"><span class="rtitle"></span><span class="rcount"></span></div>
+    <div class="rlist"></div>
+    <div class="rkeys">
+      <div><kbd>→</kbd> <kbd>PgDn</kbd> next file</div>
+      <div><kbd>←</kbd> <kbd>PgUp</kbd> previous</div>
+      <div><kbd>Enter</kbd> looks good, next</div>
+      <div><kbd>C</kbd> comment on this file</div>
+      <div><kbd>Esc</kbd> back to the feature</div>
+    </div>
+  </div>
+  <div class="stage">
+    <div class="progress"><span></span></div>
+    <div class="bar">
+      <span class="pos"></span>
+      <span class="path"></span>
+      <span class="newly" hidden></span>
+      <span class="grow"></span>
+      <button class="prev" type="button" title="Previous file (←)">← Previous</button>
+      <button class="next" type="button" title="Next file (→)">Forward →</button>
+      <button class="good" type="button" title="Mark viewed and go on (Enter)">Looks good ✓</button>
+      <button class="say" type="button" title="Comment on this file (C)">Comment</button>
+      <button class="close" type="button" title="Close (Esc)" aria-label="Close">✕</button>
+    </div>
+    <div class="code"></div>
+  </div>
+</div>
 <div id="zoom" class="zoom" hidden role="dialog" aria-label="Diagram, full screen">
   <div class="bar"><span class="cap"></span><button class="close" type="button" title="Close (Esc)" aria-label="Close">✕</button></div>
   <div class="body"></div>

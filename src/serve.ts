@@ -1,6 +1,10 @@
 // Serve the review page on a random localhost port and block until the
-// reviewer decides. The page POSTs /api/state on every change, /api/decision
-// on Submit, and beacons /api/dismiss when the tab closes without submitting.
+// reviewer decides. The page POSTs /api/state on every change and
+// /api/decision on Submit. Submit is the only thing that ends the review;
+// otherwise the run waits until the timeout, because a page can go away for
+// reasons that are not the reviewer leaving — a reload, a restored session, a
+// browser moved to another tab group. Every change is already on disk, so a
+// reviewer who closes the tab loses nothing and can re-run to pick it up.
 
 import type { Review } from "./build.ts";
 import { saveState, type ReviewState } from "./state.ts";
@@ -12,7 +16,7 @@ export type Outcome = {
   summary: string;
   url: string;
 };
-export type ServeOptions = { port: number; open: boolean; timeoutSeconds?: number; persist: boolean };
+export type ServeOptions = { port: number; open: boolean; timeoutSeconds?: number; persist: boolean; initialState?: ReviewState | null };
 
 /** All features approved -> approved. Any changes requested -> changes. Otherwise something was left open. */
 export function classify(review: Review, features: Record<string, FeatureDecision>): Outcome["decision"] {
@@ -22,16 +26,25 @@ export function classify(review: Review, features: Record<string, FeatureDecisio
   return "incomplete";
 }
 
+const hms = (s: number) => s >= 3600 ? `${+(s / 3600).toFixed(1)}h` : s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+
 export function serve(html: string, review: Review, opts: ServeOptions): Promise<Outcome> {
   const { promise, resolve } = Promise.withResolvers<Outcome>();
   let settled = false;
   const settle = (outcome: Outcome) => {
     if (settled) return;
     settled = true;
-    setTimeout(() => server.stop(true), 300);   // let the page paint "Submitted" first
+    setTimeout(() => server.stop(true), 300);   // the process usually exits first; this is for embedders
     resolve(outcome);
   };
-  const dismissed = () => ({ decision: "dismissed" as const, features: {}, summary: "", url });
+  let latest: ReviewState = opts.initialState ?? {};
+  const page = () => html.replace("__STATE__", () => JSON.stringify(latest).replaceAll("</", "<\\/"));
+  const dismissed = () => ({
+    decision: "dismissed" as const,
+    features: Object.fromEntries(Object.entries(latest).filter(([, f]) => f.decision)) as Record<string, FeatureDecision>,
+    summary: "",
+    url,
+  });
 
   const server = Bun.serve({
     port: opts.port,
@@ -39,34 +52,38 @@ export function serve(html: string, review: Review, opts: ServeOptions): Promise
     async fetch(req) {
       const { pathname } = new URL(req.url);
       if (req.method === "GET" && pathname === "/") {
-        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+        return new Response(page(), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
       }
       if (req.method === "POST" && pathname === "/api/state") {
-        const features = (await req.json()) as ReviewState;
-        if (opts.persist) await saveState(review.pr, features).catch((e) => console.error(`zreview: could not save state: ${(e as Error).message}`));
+        latest = (await req.json()) as ReviewState;
+        if (opts.persist) await saveState(review, latest).catch((e) => console.error(`zreview: could not save state: ${(e as Error).message}`));
         return Response.json({ ok: true });
       }
       if (req.method === "POST" && pathname === "/api/decision") {
         const body = (await req.json()) as { features?: Record<string, FeatureDecision>; summary?: string };
         const features = body.features ?? {};
-        settle({ decision: classify(review, features), features, summary: body.summary ?? "", url });
-        return Response.json({ ok: true });
-      }
-      if (req.method === "POST" && pathname === "/api/dismiss") {
-        settle(dismissed());
+        const outcome: Outcome = { decision: classify(review, features), features, summary: body.summary ?? "", url };
+        // Settle on a later tick: resolving here hands control back to the CLI, which prints and exits
+        // before Bun writes this response, leaving the page with a failed fetch and no "Submitted".
+        setTimeout(() => settle(outcome), 150);
         return Response.json({ ok: true });
       }
       return new Response("not found", { status: 404 });
     },
   });
   const url = `http://127.0.0.1:${server.port}/`;
-  console.error(`zreview: ${url}`);
+  console.error(`zreview: ${url}${opts.timeoutSeconds ? ` (waiting for Submit, up to ${hms(opts.timeoutSeconds)})` : " (waiting for Submit, no timeout)"}`);
 
   if (opts.open) {
     const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
     Bun.spawn([opener, url], { stdout: "ignore", stderr: "ignore" });
   }
-  if (opts.timeoutSeconds) setTimeout(() => settle(dismissed()), opts.timeoutSeconds * 1000);
+  if (opts.timeoutSeconds) {
+    setTimeout(() => {
+      console.error(`zreview: no Submit within ${hms(opts.timeoutSeconds!)}; returning what was decided`);
+      settle(dismissed());
+    }, opts.timeoutSeconds * 1000);
+  }
 
   return promise;
 }

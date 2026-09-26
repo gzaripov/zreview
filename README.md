@@ -47,11 +47,29 @@ the head, split the diff into features, write `review.json`, run `zreview
 review`, wait, act on what comes back. The agent does the analysis; zreview
 renders it and collects your decision.
 
+### Reviewing the plan first
+
+Before the code exists, the same page reviews what you intend to ship. Write
+the features with their scenario, what each will change, the entities and the
+diagrams, `tested` as the test plan, and no `files`:
+
+```bash
+zplan plan.json          # or: zreview plan plan.json
+```
+
+A plan needs only `pr.repo` and `pr.title` — there is no branch yet. Give the
+file an `id` and keep it: the decisions made on the plan follow the PR that
+implements it. When the code is written, add the files and the real `pr`
+fields, drop `"plan": true`, and run `zreview review`. The reviewer sees which
+parts of the spec you reworked since they approved the plan, and the files as
+newly arrived.
+
 ### By hand
 
 Write `review.json` (schema below), then:
 
 ```bash
+zplan  plan.json                             # the plan, before any code exists
 zreview review review.json                   # opens the page, blocks, prints the summary
 zreview review review.json --json            # one JSON record instead
 zreview build  review.json -o review.html    # static page, no server, nothing to wait for
@@ -69,24 +87,46 @@ and the page degrades to file links.
   viewed.
 - **Each feature** shows the user scenario, what changed, the entities it
   adds or changes (what each consists of, what you can do with it, why, and a
-  serialized example under a cut), architecture diagrams (hover one for a
+  serialized examples beside them, in an editor with a tab per case), architecture diagrams (hover one for a
   full-screen button; Esc closes), before/after screenshots, the
   syntax-highlighted diff, and how it was tested.
 - **Viewed** — a checkbox on each file in the diff, as on GitHub. Checking
   it folds the file; the Diff heading counts them.
+- **Focus review** — the button in the Diff heading opens one file at a time,
+  full screen, starting at the first you have not viewed. The rail on the
+  left groups the feature's files in the order worth reading them: the domain
+  types the feature declares, then what stores them, the logic, the
+  interfaces it is reached through, the surface, and last the tests and
+  generated files. `→` `PgDn` and `←` `PgUp` move, `Enter` marks the file
+  viewed and goes on, `C` comments on the whole file, `Esc` returns. A
+  horizontal swipe works on a touchscreen. Clicking a diff line still
+  comments on that line.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.
 - **Approve** or **Request changes** per feature, with a note.
-- **Submit review** returns the decision to the process. Close the tab
-  instead and it returns `dismissed`. **Copy review summary** and **Export
-  decisions.json** work with or without a server.
+- **Theme** — the ☾/☀ button in the sidebar switches light and dark; the
+  page starts on your OS setting and remembers the switch.
+- **Submit review** returns the decision to the process, and is the only
+  thing that ends it. Reloading or closing the tab does not: every change is
+  already on disk, so re-run and carry on where you were. **Copy review
+  summary** and **Export decisions.json** work with or without a server.
 
 Decisions, notes, comments and viewed files persist across runs in
 `~/.local/state/zreview/<repo>#<number>.json` (or `$XDG_STATE_HOME`, or
 `$ZREVIEW_STATE_DIR`), keyed on the PR rather than the head, so a re-run after
-the author pushes resumes where you were. A decision made on an earlier head
-says so next to its timestamp. `--fresh` ignores the file and starts over. A
+the author pushes resumes where you were.
+
+Deciding on a feature saves a revision: the prose, the entities, the diagrams
+and every file's lines as you had them. Marking a file viewed saves that
+file's. On the next run the page shows what the author moved since, not just
+that something moved — a bar naming the parts that were reworked, an
+*updated* chip on each changed section, the old wording struck through beside
+the new in the scenario, description and tested blocks, and in the diff a
+yellow gutter on the lines that are new to you while the lines you already
+read stay plain. Focus review marks the same files in its rail and counts the
+new lines per file. **Mark as seen** takes the page as your new starting
+point; the reworked files' Viewed checks clear on their own. `--fresh` ignores the file and starts over. A
 static `build` keeps the state in the browser instead.
 
 ## The contract
@@ -98,11 +138,16 @@ stdout is the whole interface.
 | `approved` | every feature approved, then Submit | the Markdown summary |
 | `changes` | any feature sent back, then Submit | the Markdown summary |
 | `incomplete` | Submit with features still open | the Markdown summary |
-| `dismissed` | tab closed, or `--timeout` elapsed | nothing |
+| `dismissed` | no Submit before `--timeout` (6 h) | nothing |
+
+When the decision is `changes` or `incomplete`, zreview prints the command to
+run once the fixes are in. Re-running is how the rework goes back to the
+reviewer: the decisions and comments resume, and reworked files come back
+marked *updated* with their viewed marks cleared.
 
 With `--json`, one record. Each feature carries its decision, note, and
 comments — `line` comments name a file, side and line; `text` comments carry
-the quoted passage and its section:
+the quoted passage and its section; `file` comments carry just the path:
 
 ```json
 { "decision": "changes",
@@ -112,7 +157,9 @@ the quoted passage and its section:
                   { "kind": "line", "file": "src/importer.ts", "side": "new", "line": 41,
                     "body": "Confirm unescaped slashes in the digest is deliberate." },
                   { "kind": "text", "section": "scenario", "quote": "same pack twice",
-                    "body": "Byte-identical, or same UUID?" } ] } },
+                    "body": "Byte-identical, or same UUID?" },
+                  { "kind": "file", "file": "src/importer.ts",
+                    "body": "This whole path duplicates the exporter." } ] } },
   "summary": "## Review of owner/name#45 at `18b8bf5`\n\n1. …",
   "url": "http://127.0.0.1:65392/" }
 ```
@@ -136,7 +183,7 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 --diff <file>           unified diff to show; default is `gh pr diff <number>`
 --no-open               do not launch a browser (prints the URL on stderr)
 --port <n>              fixed port instead of random
---timeout <seconds>     give up as dismissed
+--timeout <seconds>     wait this long for a Submit, default 21600 (6 h); 0 waits forever
 --fresh                 ignore the saved state for this PR
 --max-width <px>        screenshot width cap, default 1200
 --quality <n>           JPEG quality, default 82
@@ -171,10 +218,14 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
 - `entities` are the domain types a feature adds, changes, renames, or
   removes. Each has `fields` (what it consists of) and `operations` (what you
   can do with it); every part carries a `meaning` and, where it matters, a
-  `why`. `renamed` entities carry `from`. An `example` is a serialized
-  instance, shown under a collapsed *Example*. A grep can list every struct in
-  a diff; it cannot tell a domain entity from `CodingKeys`, so this is
-  authored judgment:
+  `why`. `renamed` entities carry `from`. `examples` are serialized
+  instances, **required** on every entity and shown beside the fields in a
+  read-only editor with a tab per case: a default that fills most fields
+  first, then edge cases, each with a `title` and an optional `note` (and
+  `lang` for a string value that is not JSON). An entity without one is exit
+  `2` naming it. A single `example` satisfies the rule too. A grep can list every struct in a
+  diff; it cannot tell a domain entity from `CodingKeys`, so this is authored
+  judgment:
 
   ```json
   "entities": [
@@ -187,7 +238,10 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
       "operations": [
         { "name": "decodeWordPack", "type": "(bytes: Uint8Array) → WordPack",
           "meaning": "Enforces the 65,536-byte ceiling first, then parses." } ],
-      "example": { "momo": 1, "kind": "spinoff", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ] } } ]
+      "examples": [
+        { "title": "Lesson with theory", "value": { "momo": 1, "kind": "spinoff", "title": "At the ramen shop", "words": [ { "surface": "食べる" } ], "theory": [ { "title": "Ordering", "body": "Point and say the name." } ] } },
+        { "title": "Word list, no theory", "note": "The wire value is still spinoff.", "value": { "momo": 1, "kind": "spinoff", "title": "Verbs", "words": [ { "surface": "食べる" } ] } },
+        { "title": "At the byte ceiling", "note": "65,536 bytes exactly; one more is rejected before parsing.", "value": { "momo": 1, "kind": "spinoff", "title": "…", "words": [] } } ] } ]
   ```
 
 - `screenshots` is `null` when the feature has no user-visible surface; the

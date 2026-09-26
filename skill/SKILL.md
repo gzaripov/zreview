@@ -71,9 +71,17 @@ removes. Each has `fields` (what it consists of) and `operations` (what you can
 do with it); every part carries a `meaning` and, where it matters, a `why`. The
 reasoning is the point — `kind: Kind` tells a reviewer nothing, *"a word list,
 or a lesson that adds theory on top; the wire value stays `spinoff` so shipped
-packs keep decoding"* tells them everything. Add an `example`: a serialized
-instance. A grep lists every struct in a diff; it cannot tell a domain entity
-from `CodingKeys`. That judgment is yours.
+packs keep decoding"* tells them everything. Every entity needs `examples`:
+serialized instances, each with a `title`, an optional one-line `note`, and
+the `value`. Omitting them is exit `2` naming the entity — an entity nobody
+showed an instance of is a declaration, not a domain type.
+The first is the default: an instance that fills most of the fields, the one
+a reviewer pictures when they read the type. Then two or three cases that
+exercise the edges — the minimal valid instance, a boundary (a maximum
+length, an empty list, a zero), a legacy or wire-compatibility shape, an
+instance that looks wrong but is valid or the reverse. Say in the `note` why
+each edge is worth looking at. A grep lists every struct in a diff; it cannot
+tell a domain entity from `CodingKeys`. That judgment is yours.
 
 **`diagrams`** — Mermaid, when the feature changes control flow, state,
 persistence, or a component boundary. Names from the code; no fictional
@@ -87,7 +95,10 @@ harness before committing. `null` when there is no user-visible surface; the
 page prints the absence. The builder inlines the images, so nothing is uploaded.
 
 **`files`** — exactly as `gh pr diff --name-only` spells them, and every one
-of them: zreview compares the features' files to the diff and exits `2`
+of them. Focus review walks them grouped by path (domain types first, then
+persistence, logic, interfaces, surface, tests, generated), and an entity's
+`file` pins that path to the front, so give every entity the file it lives
+in: zreview compares the features' files to the diff and exits `2`
 naming any changed file no feature claims, or any listed path the PR does not
 change. A lockfile or generated file belongs to the feature whose change
 produced it.
@@ -96,7 +107,22 @@ produced it.
 covered. If nothing ran, say so and name what a reviewer should run. Never
 hoist every result under one feature; the reviewer approves features.
 
-## 3. Review
+## 3. Review the plan first, when there is one to review
+
+For work worth agreeing on before writing it, the same page reviews the plan.
+Write `review.json` with `"plan": true`, an `id` you will keep, `pr.repo` and
+`pr.title` only, and features carrying the scenario, what each will change,
+the entities it will add, the diagrams and `tested` as the test plan — and no
+`files`, because nothing is written. Run `zplan plan.json`. On `changes`,
+rework the plan and run it again. On `approved`, build it.
+
+Then review the code: add each feature's files and the real `pr` fields, drop
+`"plan": true`, and run `zreview review` with the same `id`. The reviewer
+keeps their plan decisions and sees what you reworked in the spec since, so
+keep the features and their ids stable — a renamed id reads as a feature they
+never agreed to.
+
+## 4. Review the code
 
 Work in a scratch directory outside the repository — the page carries base64
 images and does not belong in a working tree.
@@ -108,17 +134,24 @@ zreview review review.json --json --result-file decision.json
 
 `zreview review` fetches the PR's diff through `gh pr diff` (or takes
 `--diff <file>`), opens the page, and **blocks**. Run it with a long or no
-timeout, or in the background, and read stdout when it returns. The
+timeout, or in the background, and read stdout when it returns. Only Submit
+ends it; a reload or a closed tab does not, so never re-run because the page
+went away. The
 reviewer's decisions, comments and viewed files persist per PR across runs,
 so after you address `changes` and push, re-run the same way and they resume
-where they were; pass `--fresh` only if they ask to start over.
+where they were; pass `--fresh` only if they ask to start over. The page
+holds the revision the reviewer last looked at and marks everything you moved
+since — the reworked prose word by word, the changed entities and diagrams,
+and the lines that are new to them — so rewrite `review.json` to match the
+fixes rather than leaving it stale. A scenario or description that no longer
+matches the code shows up as a reworked passage they have to read twice.
 
 | `decision` | Meaning |
 |---|---|
 | `approved` | every feature approved |
 | `changes` | at least one sent back; `features[id].note` and `comments` say why |
 | `incomplete` | submitted with features still open |
-| `dismissed` | tab closed or `--timeout` elapsed; nothing to act on |
+| `dismissed` | no Submit within `--timeout`, 6 h by default; whatever was decided comes back, so check `features` before treating it as nothing |
 
 `--require-approval` makes the exit code carry it: `0` approved, `1`
 otherwise. Exit `2` means zreview could not run — it names the bad field or
@@ -128,12 +161,22 @@ Open the page yourself once before handing it over and walk every feature:
 diagrams rendered, screenshots load, file links resolve, entities read as
 prose rather than declarations.
 
-## 4. Act on the decision
+## 5. Act on the decision
 
 `changes` — each sent-back feature's note and comments are the reviewer's ask.
 Address them in the same conversation; do not re-litigate a verdict. A `line`
 comment names `file`, `side` and `line`; a `text` comment carries the quoted
-passage. `dismissed` — say so briefly and continue.
+passage. A `file` comment names a file and nothing else — it is about that
+file's change as a whole. `dismissed` — say so briefly and continue.
+
+**Then run `zreview review` again.** A review that came back `changes` or
+`incomplete` is not finished: the reviewer is waiting to see the rework, and
+re-running is the only way to hand it back. Push the fixes, refresh
+`review.json` for anything the fixes moved — new files, a changed diagram, an
+entity that gained a field — and re-run the same command. Decisions, comments
+and viewed marks resume, and the files you reworked come back marked
+`updated` with their viewed marks cleared, so the reviewer sees exactly what
+changed since they looked. Keep going until the decision is `approved`.
 
 The record's `summary` is the verdicts as Markdown. Neither zreview nor you
 post it anywhere unless asked. When asked, whose PR it is decides the command:

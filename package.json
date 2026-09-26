@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "Review a pull request one feature at a time. Opens a local page, blocks until you decide, prints the decision.",
   "type": "module",
-  "bin": { "zreview": "src/cli.ts" },
+  "bin": { "zreview": "src/cli.ts", "zplan": "src/zplan.ts" },
   "files": ["src", "README.md"],
   "scripts": {
     "review": "bun run src/cli.ts review",
