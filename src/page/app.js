@@ -683,6 +683,7 @@
   // ---- focus review: one file at a time, full screen, in that order
   const focus = document.getElementById('focus');
   let focusAt = -1;                                 // index into reading(current).flat, -1 when closed
+  let focusShown = null;                            // the file the panel last drew, so a redraw of it keeps its scroll
   const focusOpen = () => focusAt >= 0;
   function openFocus(f, index) {
     const { flat } = reading(f);
@@ -695,7 +696,7 @@
   }
   function closeFocus() {
     if (!focusOpen()) return;
-    focusAt = -1; focus.hidden = true; focus.querySelector('.code').replaceChildren();
+    focusAt = -1; focusShown = null; focus.hidden = true; focus.querySelector('.code').replaceChildren();
     document.body.classList.remove('zoomed');
     render();
   }
@@ -736,10 +737,14 @@
     rail.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });
 
     const code = focus.querySelector('.code');
+    // A new file starts at its top. A redraw of the same one (a comment, an unfolded block, Rendered or
+    // Source) keeps the reader's place, now that the panel scrolls.
+    const shown = `${f.id}\n${file.path}`, keep = focusShown === shown ? code.scrollTop : 0;
     const cs = entry(f.id).comments.filter(c => c.kind === 'file' && c.file === file.path);
     code.innerHTML = `${cs.map(c => `<div class="lc"><div class="who">file comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('')}
       <div class="file" data-path="${esc(file.path)}">${fileBody(f, file)}</div>`;
-    code.scrollTop = 0;
+    code.scrollTop = keep;
+    focusShown = shown;
     focus.querySelector('.mdbox').innerHTML = mdToggle(file);
     code.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row, renderFocus); });
     bindRendered(focus, f, renderFocus);
