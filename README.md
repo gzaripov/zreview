@@ -99,9 +99,19 @@ and the page degrades to file links.
   types the feature declares, then what stores them, the logic, the
   interfaces it is reached through, the surface, and last the tests and
   generated files. `→` `PgDn` and `←` `PgUp` move, `Enter` marks the file
-  viewed and goes on, `C` comments on the whole file, `Esc` returns. A
-  horizontal swipe works on a touchscreen. Clicking a diff line still
-  comments on that line.
+  viewed and goes on, `C` comments on the whole file, `Esc` returns, `R`
+  switches a Markdown file between rendered and source. A horizontal swipe
+  works on a touchscreen. Clicking a diff line still comments on that line.
+- **Markdown, rendered** — `.md` and `.mdx` files open as the document they
+  become. Added blocks are green, removed ones red, and an edited paragraph
+  or list item shows its changed words in place. Changed front matter and
+  code blocks show their changed lines. Long unchanged stretches fold, and a
+  click unfolds them. The `+` on a block comments on its first line, like a
+  diff-line comment. **Rendered | Source** in the file's header switches the
+  view, and the page remembers the choice. A changed file renders only when
+  zreview can fetch the whole file with `gh` at `pr.head` and it matches the
+  diff. Otherwise the file shows its source diff. Added and deleted files
+  always render.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.

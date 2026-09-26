@@ -17,7 +17,7 @@ export type Shots = { before?: string; after?: string; caption?: string; before_
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
 export type Hunk = { header: string; lines: DiffLine[] };
 export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
-export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string };
+export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string; text?: { before: string; after: string } };
 /** A field is what an entity consists of; an operation is what you can do with it. Both carry the reasoning, not just the type. */
 export type Part = { name: string; type?: string; meaning: string; why?: string; change?: "added" | "changed" | "removed" };
 export type Entity = {
@@ -49,7 +49,10 @@ export type Review = {
   pr: { repo: string; number?: number; url?: string; title: string; base?: string; head?: string; exposure?: string };
   features: Feature[];
 };
-export type BuildOptions = { maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean };
+export type BuildOptions = {
+  maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean;
+  headText?: (path: string) => Promise<string | undefined>;
+};
 
 /** Parse a unified diff (git / `gh pr diff`) into per-file hunks with old and new line numbers. */
 export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
@@ -82,6 +85,36 @@ export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
 }
 
 export class ReviewError extends Error {}
+
+export const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
+
+export function beforeAndAfter(after: string, hunks: Hunk[]): { before: string; after: string } | undefined {
+  const next = after.split("\n"), prev: string[] = [], last = hunks.at(-1)?.lines.at(-1);
+  let at = 0;
+  for (const h of hunks) {
+    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(h.header);
+    if (!m) return undefined;
+    const start = m[2] === "0" ? Number(m[1]) : Number(m[1]) - 1;
+    if (start < at) return undefined;
+    prev.push(...next.slice(at, start));
+    at = start;
+    for (const l of h.lines) {
+      if (l === last && l.t === " " && l.text === "" && next[at] !== "") break;
+      if (l.t !== "+") prev.push(l.text);
+      if (l.t !== "-") { if (next[at] !== l.text) return undefined; at++; }
+    }
+  }
+  prev.push(...next.slice(at));
+  return { before: prev.join("\n"), after };
+}
+
+async function markdownText(ref: FileRef, headText: BuildOptions["headText"]): Promise<FileRef["text"]> {
+  const side = (skip: string) => ref.hunks!.flatMap((h) => h.lines.filter((l) => l.t !== skip).map((l) => l.text)).join("\n");
+  if (ref.status === "added") return { before: "", after: side("-") };
+  if (ref.status === "deleted") return { before: side("+"), after: "" };
+  const after = await headText?.(ref.path);
+  return after === undefined ? undefined : beforeAndAfter(after, ref.hunks!);
+}
 
 async function pixelWidth(path: string): Promise<number | null> {
   const out = await $`sips -g pixelWidth ${path}`.quiet().nothrow();
@@ -190,6 +223,13 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     ];
     if (problems.length) throw new ReviewError(`${reviewPath}: ${problems.length} file${problems.length === 1 ? "" : "s"} out of step with the PR:\n  ${problems.join("\n  ")}`);
   }
+  const texts = new Map<string, Promise<FileRef["text"]>>();
+  await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
+    if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
+    if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, opts.headText));
+    ref.text = await texts.get(ref.path);
+    if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
+  })));
   const payload = JSON.stringify(review).replaceAll("</", "<\\/").replaceAll("__", "_\\u005f");
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all(

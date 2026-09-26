@@ -85,6 +85,12 @@ async function loadDiff(path: string | undefined, repo: string, number: number):
   if (r.exitCode !== 0) { console.error(`zreview: gh pr diff failed, reviewing without the diff: ${r.stderr.toString().trim()}`); return undefined; }
   return r.stdout.toString();
 }
+
+async function headText(repo: string, head: string, path: string): Promise<string | undefined> {
+  const route = `repos/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(head)}`;
+  const r = await $`gh api -H ${"Accept: application/vnd.github.raw+json"} ${route}`.quiet().nothrow();
+  return r.exitCode === 0 ? r.stdout.toString() : undefined;
+}
 const argv = process.argv.slice(2);   // process.argv, not Bun.argv: the zplan shim prepends its command
 if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") { console.log(USAGE); process.exit(0); }
 
@@ -122,6 +128,7 @@ try {
     served: command !== "build",
     plan: command === "plan",
     diffText: loaded.plan ? undefined : await loadDiff(opt.diff, pr.repo, pr.number!),
+    headText: !loaded.plan && pr.head && Bun.which("gh") ? (path) => headText(pr.repo, pr.head!, path) : undefined,
   });
 
   if (command === "build") {
