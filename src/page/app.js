@@ -4,6 +4,7 @@ import hljs from 'highlight.js/lib/common';
 import { blockOps, lcsOps, wordDiff } from './lib/diff.ts';
 import { esc } from './lib/html.ts';
 import { hlLines, langOf } from './lib/highlight.ts';
+import { fhash, fileShot, isViewedIn, sinceSeen, snapshot } from './lib/revisions.ts';
 
 // Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
 const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementById('review-boot').textContent);
@@ -81,20 +82,10 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
   // feature and, per file, when they mark it viewed. Everything a reviewer reads is in it — the prose,
   // the entities, the diagrams and the diff itself — so the next run can show what the author moved
   // rather than only that something moved.
-  const LINE_CAP = 4000;                            // beyond this a file keeps its hash but not its lines
-  const hashStr = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
-  const fhash = (file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null;
-  const flatLines = (file) => file.hunks ? file.hunks.flatMap(h => h.lines.map(l => l.t + l.text)) : null;
-  const fileShot = (file) => { const lines = flatLines(file); return { h: fhash(file), lines: lines && lines.length <= LINE_CAP ? lines : null }; };
-  const textOf = (f) => ({ scenario: f.scenario || '', description: f.description || '', tested: f.tested || '' });
-  const entityShots = (f) => Object.fromEntries((f.entities || []).map(e => [e.name, hashStr(JSON.stringify(e))]));
-  const shot = (f) => ({
-    at: Date.now(), head: data.pr.head || 'plan', text: textOf(f), entities: entityShots(f),
-    diagrams: hashStr(JSON.stringify(f.diagrams || [])),
-    files: Object.fromEntries((f.files || []).map(file => [file.path, fileShot(file)])),
-  });
+  const shot = (f) => snapshot(f, data.pr.head || 'plan');
   const seenOf = (f) => entry(f.id).seen;
-  const isViewed = (f, file) => { const v = entry(f.id).viewed ||= {}; return file.path in v && v[file.path] === fhash(file); };
+  // Reading a feature's entry creates it, and the viewed map in it, as it always has: both reach the saved state.
+  const isViewed = (f, file) => { entry(f.id).viewed ||= {}; return isViewedIn(state[f.id], file); };
   const viewedCount = (f) => { const files = f.files || []; return { seen: files.filter(x => isViewed(f, x)).length, total: files.length }; };
   function toggleViewed(f, file, on = !isViewed(f, file)) {
     const e = entry(f.id), v = e.viewed ||= {};
@@ -108,40 +99,7 @@ const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementB
     save(); render(); renderFocus();
   }
 
-  /** Lines of `now` the reviewer has not seen. Order-insensitive, so code that only moved is not "new". */
-  function freshLines(now, before) {
-    if (!now) return null;
-    if (!before) return now.map(() => false);
-    const left = new Map();
-    for (const l of before) left.set(l, (left.get(l) || 0) + 1);
-    const fresh = now.map(l => { const n = left.get(l) || 0; if (n) { left.set(l, n - 1); return false; } return true; });
-    let gone = 0; for (const n of left.values()) gone += n;
-    fresh.gone = gone;
-    return fresh;
-  }
-  /** Everything that moved since the reviewer's snapshot, keyed the way the panel needs it. */
-  function since(f) {
-    const s = seenOf(f);
-    const out = { any: false, at: s?.at, head: s?.head, text: {}, entities: new Set(), diagrams: false, files: {} };
-    if (!s) return out;
-    if (s.text) for (const k of ['scenario', 'description', 'tested']) {
-      if ((s.text[k] ?? '') !== (textOf(f)[k] ?? '')) { out.text[k] = s.text[k] ?? ''; out.any = true; }
-    }
-    if (s.entities) for (const [name, h] of Object.entries(entityShots(f))) {
-      if (s.entities[name] !== undefined && s.entities[name] !== h) { out.entities.add(name); out.any = true; }
-    }
-    if (s.diagrams !== undefined && s.diagrams !== hashStr(JSON.stringify(f.diagrams || []))) { out.diagrams = true; out.any = true; }
-    out.newFiles = s.files ? (f.files || []).filter(x => !(x.path in s.files)).map(x => x.path) : [];
-    if (out.newFiles.length) out.any = true;
-    for (const file of f.files || []) {
-      const was = s.files?.[file.path];
-      if (!was || was.h === fhash(file)) continue;
-      const fresh = freshLines(flatLines(file), was.lines);
-      out.files[file.path] = { fresh, added: fresh ? fresh.filter(Boolean).length : null, gone: fresh ? fresh.gone : null };
-      out.any = true;
-    }
-    return out;
-  }
+  const since = (f) => sinceSeen(f, seenOf(f));
   let sinceMemo = { id: null, val: null };
   const sinceOf = (f) => (sinceMemo.id === f.id ? sinceMemo.val : (sinceMemo = { id: f.id, val: since(f) }).val);
   const forgetSince = () => { sinceMemo = { id: null, val: null }; };
