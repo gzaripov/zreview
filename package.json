@@ -11,6 +11,7 @@
   },
   "engines": { "bun": ">=1.2" },
   "dependencies": { "mermaid": "11.4.1" },
+  "overrides": { "@mermaid-js/parser": "0.3.0" },
   "license": "MIT",
   "author": "Gleb Zaripov <https://zaripov.dev>",
   "repository": "github:gzaripov/zreview",

@@ -9,6 +9,9 @@ let parser: Promise<Parse> | undefined;
 function loadParser(): Promise<Parse> {
   parser ??= (async () => {
     const fix = `run \`bun install\` in ${dirname(import.meta.dir)}`;
+    // The pin is both the version checked here and the one the page loads from the CDN, so it has to be
+    // one version: "^11.4.1" would never equal what is installed, and the CDN would pick its own 11.x.
+    if (!/^\d+\.\d+\.\d+$/.test(mermaidVersion)) throw new Error(`package.json must pin mermaid to one exact version, not "${mermaidVersion}"`);
     const found = await import("mermaid/package.json").then(
       (m) => m.default.version as string,
       (e: Error) => { throw new Error(`Mermaid is not installed (${e.message}); ${fix}`); },
@@ -41,7 +44,16 @@ async function quietly<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+// The CLI loads the review, then buildHtml loads it again; each diagram is still parsed once.
+const checked = new Map<string, Promise<string | null>>();
+
 export function diagramError(source: string): Promise<string | null> {
+  let result = checked.get(source);
+  if (!result) checked.set(source, (result = parseError(source)));
+  return result;
+}
+
+function parseError(source: string): Promise<string | null> {
   return quietly(async () => {
     const parse = await loadParser();
     return parse(source).then(
