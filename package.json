@@ -7,10 +7,13 @@
   "files": ["src", "README.md"],
   "scripts": {
     "review": "bun run src/cli.ts review",
-    "build": "bun run src/cli.ts build"
+    "build": "bun run src/cli.ts build",
+    "test": "bun test src",
+    "e2e": "bun test test/e2e --timeout 120000"
   },
   "engines": { "bun": ">=1.2" },
   "dependencies": { "mermaid": "11.4.1" },
+  "devDependencies": { "playwright-core": "1.63.0" },
   "overrides": { "@mermaid-js/parser": "0.3.0" },
   "license": "MIT",
   "author": "Gleb Zaripov <https://zaripov.dev>",
