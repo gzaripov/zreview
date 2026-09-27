@@ -1,6 +1,7 @@
 node_modules/
 review.html
 review.json
+!test/e2e/fixture/review.json
 *.tmp
 .DS_Store
 bun.lock

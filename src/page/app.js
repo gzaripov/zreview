@@ -1,3 +1,17 @@
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import hljs from 'highlight.js/lib/common';
+import { lcsOps, wordDiff } from './lib/diff.ts';
+import { esc } from './lib/html.ts';
+import { hlLines, langOf } from './lib/highlight.ts';
+import { byLine, linesOf, markdownRows, MARKDOWN } from './lib/markdown.ts';
+import { fhash, fileShot, isViewedIn, sinceSeen, snapshot } from './lib/revisions.ts';
+import { reading } from './lib/reading.ts';
+import { summary as summaryOf } from './lib/summary.ts';
+
+// Whether a server is listening, and the state it saved; `null` state on a static page. See index.html.
+const { served: SERVED, state: INITIAL_STATE } = JSON.parse(document.getElementById('review-boot').textContent);
+
 (() => {
   const data = JSON.parse(document.getElementById('review-data').textContent);
   marked.setOptions({ mangle: false, headerIds: false });
@@ -36,7 +50,6 @@
   const entry = (id) => (state[id] ||= { comments: [] }, state[id].comments ||= [], state[id]);
   const uid = () => Math.random().toString(36).slice(2, 10);
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const md = (s) => s ? marked.parse(s) : '';
   const main = document.getElementById('main');
 
@@ -72,20 +85,10 @@
   // feature and, per file, when they mark it viewed. Everything a reviewer reads is in it — the prose,
   // the entities, the diagrams and the diff itself — so the next run can show what the author moved
   // rather than only that something moved.
-  const LINE_CAP = 4000;                            // beyond this a file keeps its hash but not its lines
-  const hashStr = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
-  const fhash = (file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null;
-  const flatLines = (file) => file.hunks ? file.hunks.flatMap(h => h.lines.map(l => l.t + l.text)) : null;
-  const fileShot = (file) => { const lines = flatLines(file); return { h: fhash(file), lines: lines && lines.length <= LINE_CAP ? lines : null }; };
-  const textOf = (f) => ({ scenario: f.scenario || '', description: f.description || '', tested: f.tested || '' });
-  const entityShots = (f) => Object.fromEntries((f.entities || []).map(e => [e.name, hashStr(JSON.stringify(e))]));
-  const shot = (f) => ({
-    at: Date.now(), head: data.pr.head || 'plan', text: textOf(f), entities: entityShots(f),
-    diagrams: hashStr(JSON.stringify(f.diagrams || [])),
-    files: Object.fromEntries((f.files || []).map(file => [file.path, fileShot(file)])),
-  });
+  const shot = (f) => snapshot(f, data.pr.head || 'plan');
   const seenOf = (f) => entry(f.id).seen;
-  const isViewed = (f, file) => { const v = entry(f.id).viewed ||= {}; return file.path in v && v[file.path] === fhash(file); };
+  // Reading a feature's entry creates it, and the viewed map in it, as it always has: both reach the saved state.
+  const isViewed = (f, file) => { entry(f.id).viewed ||= {}; return isViewedIn(state[f.id], file); };
   const viewedCount = (f) => { const files = f.files || []; return { seen: files.filter(x => isViewed(f, x)).length, total: files.length }; };
   function toggleViewed(f, file, on = !isViewed(f, file)) {
     const e = entry(f.id), v = e.viewed ||= {};
@@ -99,71 +102,12 @@
     save(); render(); renderFocus();
   }
 
-  /** Lines of `now` the reviewer has not seen. Order-insensitive, so code that only moved is not "new". */
-  function freshLines(now, before) {
-    if (!now) return null;
-    if (!before) return now.map(() => false);
-    const left = new Map();
-    for (const l of before) left.set(l, (left.get(l) || 0) + 1);
-    const fresh = now.map(l => { const n = left.get(l) || 0; if (n) { left.set(l, n - 1); return false; } return true; });
-    let gone = 0; for (const n of left.values()) gone += n;
-    fresh.gone = gone;
-    return fresh;
-  }
-  /** Everything that moved since the reviewer's snapshot, keyed the way the panel needs it. */
-  function since(f) {
-    const s = seenOf(f);
-    const out = { any: false, at: s?.at, head: s?.head, text: {}, entities: new Set(), diagrams: false, files: {} };
-    if (!s) return out;
-    if (s.text) for (const k of ['scenario', 'description', 'tested']) {
-      if ((s.text[k] ?? '') !== (textOf(f)[k] ?? '')) { out.text[k] = s.text[k] ?? ''; out.any = true; }
-    }
-    if (s.entities) for (const [name, h] of Object.entries(entityShots(f))) {
-      if (s.entities[name] !== undefined && s.entities[name] !== h) { out.entities.add(name); out.any = true; }
-    }
-    if (s.diagrams !== undefined && s.diagrams !== hashStr(JSON.stringify(f.diagrams || []))) { out.diagrams = true; out.any = true; }
-    out.newFiles = s.files ? (f.files || []).filter(x => !(x.path in s.files)).map(x => x.path) : [];
-    if (out.newFiles.length) out.any = true;
-    for (const file of f.files || []) {
-      const was = s.files?.[file.path];
-      if (!was || was.h === fhash(file)) continue;
-      const fresh = freshLines(flatLines(file), was.lines);
-      out.files[file.path] = { fresh, added: fresh ? fresh.filter(Boolean).length : null, gone: fresh ? fresh.gone : null };
-      out.any = true;
-    }
-    return out;
-  }
+  const since = (f) => sinceSeen(f, seenOf(f));
   let sinceMemo = { id: null, val: null };
   const sinceOf = (f) => (sinceMemo.id === f.id ? sinceMemo.val : (sinceMemo = { id: f.id, val: since(f) }).val);
   const forgetSince = () => { sinceMemo = { id: null, val: null }; };
   /** Paths whose hunks differ from what the reviewer last saw. */
   const changedSince = (f) => Object.keys(sinceOf(f).files).sort();
-
-  // ---- word-level diff for the prose blocks, so "what changed" shows what changed
-  function lcsOps(a, b) {
-    const m = a.length, n = b.length;
-    const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
-    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    const ops = []; let i = 0, j = 0;
-    while (i < m && j < n) {
-      if (a[i] === b[j]) ops.push(['same', i++, j++]);
-      else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push(['del', i++, -1]);
-      else ops.push(['ins', -1, j++]);
-    }
-    while (i < m) ops.push(['del', i++, -1]);
-    while (j < n) ops.push(['ins', -1, j++]);
-    return ops;
-  }
-  function wordDiff(before, after) {
-    const tok = (s) => s.split(/(\s+)/).filter(x => x !== '');
-    const a = tok(before), b = tok(after);
-    if (a.length + b.length > 2400) return null;               // too long to diff cheaply; show the text plain
-    const out = [];
-    const push = (kind, text) => { const last = out[out.length - 1]; last && last.kind === kind ? last.text += text : out.push({ kind, text }); };
-    for (const [kind, i, j] of lcsOps(a, b)) push(kind, kind === 'del' ? a[i] : b[j]);
-    return out;
-  }
 
   // ---- blocks
   function shots(s) {
@@ -207,8 +151,8 @@
     if (!window.require?.config) return done(null);
     window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob(
       [`self.MonacoEnvironment={baseUrl:'${MONACO}/'};importScripts('${MONACO}/vs/base/worker/workerMain.js');`], { type: 'text/javascript' })) };
-    require.config({ paths: { vs: `${MONACO}/vs` } });
-    require(['vs/editor/editor.main'], () => {
+    window.require.config({ paths: { vs: `${MONACO}/vs` } });
+    window.require(['vs/editor/editor.main'], () => {
       const m = window.monaco;
       const rules = (kw, key, str, num, cm) => [
         { token: 'keyword', foreground: kw }, { token: 'string.key.json', foreground: key }, { token: 'string.value.json', foreground: str },
@@ -256,31 +200,6 @@
     </div>`;
   }
 
-  // Syntax highlighting: each side of a hunk is highlighted as one block so
-  // multi-line tokens survive, then split back into lines.
-  const LANG = { ts: 'typescript', tsx: 'typescript', mts: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
-    py: 'python', rb: 'ruby', rs: 'rust', kt: 'kotlin', kts: 'kotlin', h: 'c', cc: 'cpp', hpp: 'cpp', cs: 'csharp', sh: 'bash', zsh: 'bash',
-    yml: 'yaml', toml: 'ini', md: 'markdown', html: 'xml', vue: 'xml', svelte: 'xml', gql: 'graphql', dockerfile: 'dockerfile', makefile: 'makefile' };
-  function langOf(path) {
-    const name = path.split('/').pop().toLowerCase(), ext = name.includes('.') ? name.split('.').pop() : name;
-    const l = LANG[ext] ?? ext;
-    return window.hljs?.getLanguage(l) ? l : null;
-  }
-  function hlLines(text, lang) {
-    let html;
-    try { html = lang ? hljs.highlight(text, { language: lang, ignoreIllegals: true }).value : esc(text); } catch { html = esc(text); }
-    const out = [], open = []; let cur = '', last = 0, m;
-    const re = /(<span[^>]*>)|(<\/span>)|\n/g;
-    while ((m = re.exec(html))) {
-      cur += html.slice(last, m.index); last = re.lastIndex;
-      if (m[1]) { open.push(m[1]); cur += m[1]; }
-      else if (m[2]) { open.pop(); cur += m[2]; }
-      else { out.push(cur + '</span>'.repeat(open.length)); cur = open.join(''); }
-    }
-    out.push(cur + html.slice(last) + '</span>'.repeat(open.length));
-    return out;
-  }
-
   function hunks(f, file) {
     if (!file.hunks) return `<p class="none" style="padding:8px 12px">Diff not loaded. Run with the PR's diff (gh on PATH, or --diff).</p>`;
     if (!file.hunks.length) return `<p class="none" style="padding:8px 12px">${file.status === 'binary' ? 'Binary file.' : 'No text changes.'}</p>`;
@@ -309,47 +228,9 @@
     }).join('');
   }
 
-  const MARKDOWN = /\.(md|markdown|mdx)$/i;
   const PURIFY = { FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'option'], FORBID_ATTR: ['style', 'form', 'formaction'] };
   let mdView = localStorage.getItem('zreview:mdview') || 'rendered';
   const richCache = new WeakMap(), richOpen = new Set();
-
-  function mdUnits(source, ref, dir) {
-    const text = source.replace(/\r\n?/g, '\n').replace(/^( *)(\t+)/gm, (_, s, t) => s + '    '.repeat(t.length));
-    const units = [];
-    let cursor = 0, pos = 0, line = 1;
-    const lineAt = (at) => { for (; pos < at; pos++) if (text.charCodeAt(pos) === 10) line++; return line; };
-    const span = (raw) => {
-      const at = Math.max(text.indexOf(raw, cursor), cursor);
-      cursor = at + raw.length;
-      return { from: lineAt(at), to: lineAt(at + Math.max(raw.trimEnd().length - 1, 0)) };
-    };
-    const unit = (type, raw, key, extra) => units.push({ type, raw, key, ref, dir, ...extra, ...span(raw) });
-    const front = /^---\n[\s\S]*?\n---[ \t]*(?:\n|$)/.exec(text);
-    if (front) unit('front', front[0], 'front\n' + front[0].trim());
-    for (const t of marked.lexer(text.slice(cursor))) {
-      if (t.type === 'space') { span(t.raw); continue; }
-      if (t.type !== 'list') { unit(t.type, t.raw, `${t.type}${t.depth ?? ''}\n${t.raw.trim()}`, { token: t }); continue; }
-      const at = Math.max(text.indexOf(t.raw, cursor), cursor);
-      cursor = at;
-      for (const item of t.items) unit('item', item.raw, `item${t.ordered ? 1 : ''}\n${item.raw.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim()}`, { list: t, item });
-      cursor = Math.max(cursor, at + t.raw.length);
-    }
-    // marked keeps some source out of every token: a link reference definition (`[docs]: https://…`) sets
-    // the target of every `[docs]` without a block of its own. A change there would not show in the rendered
-    // view at all, so each run of non-blank lines that no block covers becomes a block of its own.
-    const lines = text.split('\n'), covered = new Uint8Array(lines.length + 2), loose = [];
-    for (const u of units) for (let n = u.from; n <= u.to; n++) covered[n] = 1;
-    for (let n = 1; n <= lines.length; n++) {
-      if (covered[n] || !lines[n - 1].trim()) continue;
-      let m = n;
-      while (m < lines.length && !covered[m + 1] && lines[m].trim()) m++;
-      const raw = lines.slice(n - 1, m).join('\n');
-      loose.push({ type: 'raw', raw, key: `raw\n${raw.trim()}`, ref, dir, from: n, to: m });
-      n = m;
-    }
-    return loose.length ? [...units, ...loose].sort((x, y) => x.from - y.from) : units;
-  }
 
   function resolveLinks(root, ref, dir) {
     const fix = (el, attr, kind) => {
@@ -373,7 +254,7 @@
     resolveLinks(body, u.ref, u.dir);
     body.querySelectorAll('pre code[class*="language-"]').forEach(el => {
       const lang = /language-(\S+)/.exec(el.className)[1];
-      if (window.hljs?.getLanguage(lang)) hljs.highlightElement(el);
+      if (hljs.getLanguage(lang)) hljs.highlightElement(el);
     });
     u.html = body.innerHTML;
     return u;
@@ -381,69 +262,11 @@
   const unitText = (u) => renderUnit(u).text;
   const unitHtml = (u) => renderUnit(u).html;
 
-  function blockOps(a, b) {
-    let s = 0, e = 0;
-    while (s < a.length && s < b.length && a[s] === b[s]) s++;
-    while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
-    const midA = a.slice(s, a.length - e), midB = b.slice(s, b.length - e);
-    if (midA.length * midB.length > 4e6) return null;
-    const ops = [];
-    for (let k = 0; k < s; k++) ops.push(['same', k, k]);
-    for (const [kind, i, j] of lcsOps(midA, midB)) ops.push([kind, i < 0 ? -1 : i + s, j < 0 ? -1 : j + s]);
-    for (let k = 0; k < e; k++) ops.push(['same', a.length - e + k, b.length - e + k]);
-    return ops;
-  }
-  const byLine = (u) => u.type === 'front' || u.type === 'raw' || u.type === 'code';
-  const linesOf = (u) => (u.type === 'code' ? u.token.text : u.raw.trim()).split('\n');
-  // How much two blocks share: the pieces both contain, weighted by length, over the larger block. Pairing
-  // asks this of every removed and added block in a changed stretch, so it counts instead of aligning:
-  // linear in the blocks' size, where a word-level LCS per pair could freeze the tab on a long rewrite.
-  function overlap(a, b) {
-    const left = new Map(); let sizeA = 0, sizeB = 0, same = 0;
-    for (const t of a) { left.set(t, (left.get(t) || 0) + 1); sizeA += t.length; }
-    for (const t of b) { sizeB += t.length; const k = left.get(t); if (k) { left.set(t, k - 1); same += t.length; } }
-    return same / Math.max(sizeA, sizeB, 1);
-  }
-  function likeness(o, n) {
-    if (o.type !== n.type || o.token?.depth !== n.token?.depth || (o.type === 'item' && o.list.ordered !== n.list.ordered)) return 0;
-    if (o.type === 'table' && (o.token.header.length !== n.token.header.length || o.token.rows.length !== n.token.rows.length)) return 0;
-    if (byLine(o)) {
-      const a = linesOf(o), b = linesOf(n);
-      return a.join('\n') === b.join('\n') ? 0 : overlap(a, b);
-    }
-    // Adjacent word pairs, not words: two unrelated paragraphs share most of their small words, but few
-    // of their word pairs, so a rewrite still reads as removed then added.
-    const a = unitText(o), b = unitText(n);
-    const pairs = (t) => { const w = t.split(/\s+/).filter(Boolean); return w.length < 2 ? w : w.slice(1).map((x, i) => `${w[i]} ${x}`); };
-    return a === b ? 0 : overlap(pairs(a), pairs(b));
-  }
-  function pairUp(ops, a, b) {
-    const out = [];
-    for (let k = 0; k < ops.length;) {
-      if (ops[k][0] === 'same') { out.push({ kind: 'same', old: a[ops[k][1]], new: b[ops[k][2]] }); k++; continue; }
-      const gone = [], come = [];
-      for (; k < ops.length && ops[k][0] !== 'same'; k++) ops[k][0] === 'del' ? gone.push(a[ops[k][1]]) : come.push(b[ops[k][2]]);
-      let next = 0;
-      for (const o of gone) {
-        let best = -1, score = 0.5;
-        if (gone.length * come.length <= 400) for (let y = next; y < come.length; y++) { const s = likeness(o, come[y]); if (s > score) { best = y; score = s; } }
-        if (best < 0) { out.push({ kind: 'del', old: o }); continue; }
-        for (; next < best; next++) out.push({ kind: 'add', new: come[next] });
-        out.push({ kind: 'mod', old: o, new: come[next++] });
-      }
-      for (; next < come.length; next++) out.push({ kind: 'add', new: come[next] });
-    }
-    return out;
-  }
   function richModel(file) {
     if (richCache.has(file)) return richCache.get(file);
     let model = null;
-    try {
-      const dir = file.path.slice(0, file.path.lastIndexOf('/') + 1);
-      const a = mdUnits(file.text.before, data.pr.base, dir), b = mdUnits(file.text.after, data.pr.head, dir);
-      const ops = blockOps(a.map(u => u.key), b.map(u => u.key));
-      if (ops) model = pairUp(ops, a, b);
-    } catch (e) { console.error(`zreview: could not render ${file.path}`, e); }
+    try { model = markdownRows(file, data.pr.base, data.pr.head, unitText); }
+    catch (e) { console.error(`zreview: could not render ${file.path}`, e); }
     richCache.set(file, model);
     return model;
   }
@@ -476,7 +299,7 @@
   }
   function lineDiffHtml(o, n) {
     const lang = n.type === 'front' ? 'yaml' : n.type === 'raw' ? 'markdown' : (n.token.lang || '').split(/\s/)[0];
-    const known = window.hljs?.getLanguage(lang) ? lang : null;
+    const known = hljs.getLanguage(lang) ? lang : null;
     const a = linesOf(o), b = linesOf(n), ha = hlLines(a.join('\n'), known), hb = hlLines(b.join('\n'), known);
     return `<pre class="rd-lines"><code>${lcsOps(a, b).map(([kind, i, j]) => `<span class="ln ${kind}">${kind === 'del' ? ha[i] : hb[j]}</span>`).join('')}</code></pre>`;
   }
@@ -493,7 +316,7 @@
   }
 
   const rdFailed = new WeakSet();                  // files whose rendered view threw; they stay on their source diff
-  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !!window.DOMPurify && !rdFailed.has(file) && !!richModel(file);
+  const canRender = (file) => MARKDOWN.test(file.path) && !!file.text && !rdFailed.has(file) && !!richModel(file);
   function fileBody(f, file) {
     if (mdView !== 'rendered' || !canRender(file)) return hunks(f, file);
     // Blocks render lazily, here, outside richModel's guard. A block marked or hljs chokes on costs this
@@ -508,8 +331,7 @@
   function mdToggle(file) {
     if (!MARKDOWN.test(file.path) || !file.hunks?.length) return '';
     const can = canRender(file), on = mdView === 'rendered' && can;
-    const why = can ? '' : !window.DOMPurify ? 'The sanitizer did not load, so Markdown shows as source'
-      : !file.text ? 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit'
+    const why = can ? '' : !file.text ? 'No rendered view: it needs the whole file, which zreview fetches with gh at the head commit'
       : rdFailed.has(file) ? 'The rendered view failed for this file, so it shows as source'
       : 'No rendered view: the two versions are too large to compare block by block, or marked could not read them';
     return `<span class="mdview"${why ? ` title="${esc(why)}"` : ''}><button type="button" data-mdview="rendered" class="${on ? 'on' : ''}" ${can ? '' : 'disabled'}>Rendered</button><button type="button" data-mdview="source" class="${on ? '' : 'on'}">Source</button></span>`;
@@ -694,31 +516,6 @@
   zoom.querySelector('.close').onclick = closeZoom;
   zoom.onclick = (e) => { if (e.target === zoom) closeZoom(); };
 
-  // ---- reading order: what a reviewer should meet first. The domain types a feature declares come
-  // first (they name everything downstream), then what stores them, then the logic, the edges it is
-  // reached through, the surface, and last the tests and generated files that only confirm the rest.
-  const ORDER = [
-    ['domain', 'Domain types'], ['data', 'Persistence'], ['logic', 'Logic'],
-    ['edge', 'Interfaces'], ['ui', 'Surface'], ['test', 'Tests'], ['config', 'Config and generated'],
-  ];
-  const entityFiles = (f) => new Set((f.entities || []).map(e => e.file).filter(Boolean));
-  function groupOf(f, path) {
-    if (/(^|[\/._-])(tests?|specs?|__tests__|__mocks__|fixtures?|snapshots?)([\/._-]|$)/i.test(path)) return 'test';
-    if (/(^|\/)(package-lock|bun\.lock|yarn\.lock|pnpm-lock|go\.sum|cargo\.lock)|\.(lock|ya?ml|toml|ini|cfg|env)$|(^|\/)(dockerfile|makefile)/i.test(path)) return 'config';
-    if (entityFiles(f).has(path)) return 'domain';
-    if (/(^|[\/._-])(entit|model|schema|domain|dto|types?)([\/._-]|$)/i.test(path)) return 'domain';
-    if (/(^|[\/._-])(repositor|store|dao|database|db|migrations?|quer|sql|prisma|persist)/i.test(path)) return 'data';
-    if (/(^|[\/._-])(route|router|api|endpoint|controller|cli|command|serve|server|middleware)/i.test(path)) return 'edge';
-    if (/\.(css|scss|sass|less|html|svg|vue|svelte)$|(^|[\/._-])(component|view|page|screen|style|ui)/i.test(path)) return 'ui';
-    return 'logic';
-  }
-  /** The feature's files, grouped and flattened into the order the rail and the arrows follow. */
-  function reading(f) {
-    const files = f.files || [];
-    const groups = ORDER.map(([key, label]) => ({ key, label, files: files.filter(x => groupOf(f, x.path) === key) })).filter(g => g.files.length);
-    return { groups, flat: groups.flatMap(g => g.files) };
-  }
-
   // ---- focus review: one file at a time, full screen, in that order
   const focus = document.getElementById('focus');
   let focusAt = -1;                                 // index into reading(current).flat, -1 when closed
@@ -882,21 +679,7 @@
   }
 
   // ---- output
-  function summary() {
-    const lines = [PLAN ? `## Plan review of ${data.pr.repo} — ${data.pr.title}` : `## Review of ${data.pr.repo}#${data.pr.number} at \`${data.pr.head}\``, ''];
-    data.features.forEach((f, i) => {
-      const s = state[f.id] || {};
-      const mark = s.decision === 'approved' ? '✅ Approved' : s.decision === 'changes' ? '❌ Changes requested' : '⬜ Not reviewed';
-      lines.push(`${i + 1}. **${f.title}** — ${mark}`);
-      if (s.note) lines.push(`   > ${s.note.replace(/\n/g, '\n   > ')}`);
-      for (const c of s.comments || []) {
-        lines.push(c.kind === 'line' ? `   - \`${c.file}:${c.line}\` — ${c.body}`
-          : c.kind === 'file' ? `   - \`${c.file}\` — ${c.body}`
-          : `   - "${c.quote.length > 80 ? c.quote.slice(0, 77) + '…' : c.quote}" — ${c.body}`);
-      }
-    });
-    return lines.join('\n');
-  }
+  const summary = () => summaryOf(data, state);
   document.getElementById('copy').onclick = async (e) => { await navigator.clipboard.writeText(summary()); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy review summary', 1500); };
   document.getElementById('export').onclick = () => {
     const blob = new Blob([JSON.stringify({ key, decisions: state }, null, 2)], { type: 'application/json' });

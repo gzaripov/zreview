@@ -94,6 +94,30 @@ export const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
 export const inlineJson = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c");
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+let script: Promise<string> | undefined;
+/** The page's script: src/page/app.js and all it imports, bundled for the browser as one IIFE. Built once per
+ *  process — a cold build takes milliseconds, so nothing is cached between runs. */
+export function pageScript(): Promise<string> {
+  return (script ??= bundlePage());
+}
+async function bundlePage(): Promise<string> {
+  const fail = (messages: string[]) => {
+    const text = messages.join("; ");
+    const hint = /could not resolve/i.test(text) ? `; run \`bun install\` in ${dirname(import.meta.dir)}` : "";
+    return new ReviewError(`cannot build the page: ${text}${hint}`);
+  };
+  let result: Bun.BuildOutput;
+  try {
+    result = await Bun.build({ entrypoints: [join(import.meta.dir, "page", "app.js")], target: "browser", format: "iife", minify: true });
+  } catch (e) {
+    throw fail(e instanceof AggregateError ? e.errors.map(String) : [String(e)]);
+  }
+  if (!result.success) throw fail(result.logs.map(String));
+  const text = await result.outputs[0].text();
+  // Without a name, a stack trace from the page shows its ~350 KB data: URL instead of a file name.
+  return `${text}\n//# sourceURL=zreview-page.js`;
+}
+
 export function beforeAndAfter(after: string, hunks: Hunk[]): { before: string; after: string } | undefined {
   const next = after.split("\n"), prev: string[] = [], last = hunks.at(-1)?.lines.at(-1);
   let at = 0;
@@ -215,8 +239,11 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
   if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} in the features:\n  ${problems.join("\n  ")}`);
   return review;
 }
-export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
+export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[]; stateSlot: string }> {
   const review = await loadReview(reviewPath, opts.plan);
+  // Started here, before the screenshot and Markdown-fetch work below, so a checkout missing its
+  // dependencies (mermaid, the page's libraries) fails fast instead of after minutes of network calls.
+  const pageBundle = pageScript();
   const base = dirname(resolve(reviewPath));
   const log: string[] = [];
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;
@@ -244,25 +271,32 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   const texts = new Map<string, Promise<FileRef["text"]>>();
   // A docs PR can change hundreds of Markdown files: fetch six at a time, not one gh process for each at once.
   const headText = opts.headText && limited(6, opts.headText);
-  await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
-    if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
-    if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, headText));
-    ref.text = await texts.get(ref.path);
-    if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
-  })));
+  try {
+    await Promise.all(review.features.flatMap((f) => (f.files as FileRef[]).map(async (ref) => {
+      if (!ref.hunks?.length || !isMarkdown(ref.path)) return;
+      if (!texts.has(ref.path)) texts.set(ref.path, markdownText(ref, headText));
+      ref.text = await texts.get(ref.path);
+      if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
+    })));
+  } catch (e) {
+    pageBundle.catch(() => {});  // this is the real error; don't let the bundle's rejection surface too
+    throw e;
+  }
   const payload = inlineJson(review);
   const page = join(import.meta.dir, "page");
-  const [index, style, app] = await Promise.all(
-    ["index.html", "style.css", "app.js"].map((name) => Bun.file(join(page, name)).text()),
-  );
+  const [index, style, app] = await Promise.all([
+    Bun.file(join(page, "index.html")).text(), Bun.file(join(page, "style.css")).text(), pageBundle,
+  ]);
   // One pass over index.html: what goes in for one placeholder is never read as another, whatever the diff
   // quotes. A served page gets a marker for its state that only this build knows; serve() fills it in on
   // every request, so a reload shows what the reviewer has done rather than what existed at startup.
   const stateSlot = opts.served ? `__STATE_${randomUUID().replaceAll("-", "")}__` : "null";
   const title = review.plan ? `Plan: ${review.pr.repo} — ${review.pr.title}` : `Review: ${review.pr.repo}#${review.pr.number}`;
+  // The script goes in as a base64 data: URL. Nothing in base64 can end the element or hide its end from the
+  // HTML parser; escaping in place could not be done safely (the bundle contains `<!--`, some inside /u regexes).
   const values: Record<string, string> = {
     TITLE: escapeHtml(title), MERMAID: mermaidVersion, STYLE: style, SERVED: String(opts.served),
-    STATE: stateSlot, REVIEW_JSON: payload, APP: app,
+    STATE: stateSlot, REVIEW_JSON: payload, APP: Buffer.from(app).toString("base64"),
   };
   const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP)__/g, (_, key: string) => values[key]!);
   return { html, review, log, stateSlot };

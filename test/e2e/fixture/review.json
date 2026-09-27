@@ -1,0 +1,43 @@
+{
+  "id": "e2e-fixture",
+  "pr": {
+    "repo": "acme/app", "number": 7, "url": "https://github.com/acme/app/pull/7",
+    "title": "Flatten live positions", "base": "main", "head": "abc1234",
+    "exposure": "Touches the live trading loop."
+  },
+  "features": [
+    {
+      "id": "flatten",
+      "title": "Flatten live positions when a run halts",
+      "scenario": "A run leaving RUNNING closes its open positions, so a halt never leaves exposure on the book.",
+      "description": "Adds `flattenRunPositions`, which takes the position lock before it reads what is open.",
+      "entities": [
+        {
+          "name": "Position", "kind": "type", "change": "changed", "file": "app/src/domain/position.ts",
+          "summary": "A holding a run has opened.",
+          "fields": [{ "name": "closedReason", "type": "\"halt\" | \"manual\"", "meaning": "Why it was closed.", "change": "added" }],
+          "examples": [{ "title": "Closed by a halt", "value": { "id": "p1", "closedReason": "halt" } }]
+        }
+      ],
+      "diagrams": [{ "title": "Halt flow", "mermaid": "flowchart LR\n  A[Run leaves RUNNING] --> B[flattenRunPositions]\n  B --> C[broker.close]" }],
+      "files": ["app/src/trading/live-flatten.ts", "app/src/domain/position.ts"],
+      "tested": "Unit tests for the flatten loop."
+    },
+    {
+      "id": "api",
+      "title": "Expose POST /api/runs/:id/flatten",
+      "scenario": "An operator flattens a run by hand.",
+      "description": "A route that calls `flattenRunPositions`, and a page on what flattening does.",
+      "files": ["app/src/api/routes.ts", "docs/flatten.md"],
+      "tested": "A route test."
+    },
+    {
+      "id": "ui",
+      "title": "Pack view hides closed positions",
+      "scenario": "A learner sees only what is still held.",
+      "description": "Filters out positions with a `closedReason`.",
+      "files": ["app/src/ui/pack-view.tsx"],
+      "tested": "Looked at it."
+    }
+  ]
+}
