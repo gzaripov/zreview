@@ -7,7 +7,8 @@
   "files": ["src", "README.md"],
   "scripts": {
     "review": "bun run src/cli.ts review",
-    "build": "bun run src/cli.ts build"
+    "build": "bun run src/cli.ts build",
+    "test": "bun test"
   },
   "engines": { "bun": ">=1.2" },
   "dependencies": { "mermaid": "11.4.1" },
