@@ -109,6 +109,37 @@ naming any changed file no feature claims, or any listed path the PR does not
 change. A lockfile or generated file belongs to the feature whose change
 produced it.
 
+**`lines`** — a feature shows the reviewer only its own changes, so when a
+file serves more than one feature, every feature that lists it says which of
+its changed lines are its own: `{ "path": "…", "lines": ["550-558", "587",
+"old:45"] }`, numbered as they are at `pr.head`, with `old:N` for a removed
+line. Every changed line needs a feature. Claim a line for what it does, not
+where it sits: an import goes with the feature that uses it, a test with the
+feature it proves, a doc line with the behaviour it describes. A line that
+serves two features — an import both use, test setup several tests share, a
+paragraph that describes both — is claimed by both; the page shows it lighter,
+tags it `also N`, and folds it when it sits away from the feature's own lines.
+A Markdown paragraph is one line, so a sentence about one feature inside a
+paragraph about another means claiming the paragraph for both, then naming the
+words that are this feature's with `"phrases": ["…"]` on the same file, copied
+from the line (backticks and emphasis marks may be left out). The page
+highlights the phrases and dims the other features' edits in the paragraph; a
+phrase that is in none of the feature's claimed lines is exit `2`. A removed
+line goes with the lines added in its place when those all belong to the same
+features. Claim it with `old:N` when they do not, or when it belongs elsewhere
+— a function one feature deletes right where another adds code; an explicit
+claim replaces the default. The page shows each feature its lines in full with
+a blue stripe, folds the hunks that belong to other features behind a bar
+naming them, and dims other features' lines inside a shared hunk.
+
+You do not need the numbers up front. zreview exits `2` before any tab opens
+when a feature that shares a file gives no `lines`, a range names no changed
+line, or a changed line has no feature. It then prints every file it rejects
+with its changed lines numbered the way `lines` takes them, each tagged with
+the feature it goes to now. List the files as usual, run zreview, claim from
+that listing, and run it again. Once it passes, open the page and check that
+each feature's shared files show its own changes and nothing else.
+
 **`tested`** — per feature. The command, the observed result, what is not
 covered. If nothing ran, say so and name what a reviewer should run. Never
 hoist every result under one feature; the reviewer approves features.
@@ -179,10 +210,13 @@ file's change as a whole. `dismissed` — say so briefly and continue.
 `incomplete` is not finished: the reviewer is waiting to see the rework, and
 re-running is the only way to hand it back. Push the fixes, refresh
 `review.json` for anything the fixes moved — new files, a changed diagram, an
-entity that gained a field — and re-run the same command. Decisions, comments
-and viewed marks resume, and the files you reworked come back marked
-`updated` with their viewed marks cleared, so the reviewer sees exactly what
-changed since they looked. Keep going until the decision is `approved`.
+entity that gained a field, and the `lines` of every shared file, whose
+numbers shift with each push (zreview names the ranges that went stale) — and
+re-run the same command. Decisions, comments and viewed marks resume, and the
+files you reworked come back marked `updated` with their viewed marks cleared,
+so the reviewer sees exactly what changed since they looked. A rework that
+touches only one feature's lines of a shared file leaves the other features
+alone. Keep going until the decision is `approved`.
 
 The record's `summary` is the verdicts as Markdown. Neither zreview nor you
 post it anywhere unless asked. When asked, whose PR it is decides the command:
@@ -199,3 +233,4 @@ else's → `gh pr review <N> --approve|--request-changes --body-file summary.md`
 - Do not draw a diagram for a feature that moved nothing.
 - Do not ship a "before" you have not looked at.
 - Do not describe files the platform file list does not contain.
+- Do not list a shared file without `lines`; say which lines are whose.
