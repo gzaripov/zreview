@@ -107,7 +107,11 @@ persistence, logic, interfaces, surface, tests, generated), and an entity's
 in: zreview compares the features' files to the diff and exits `2`
 naming any changed file no feature claims, or any listed path the PR does not
 change. A lockfile or generated file belongs to the feature whose change
-produced it.
+produced it. zreview groups the files by kind and path for Focus review:
+domain types, persistence, logic, interfaces, surface, tests, docs, config
+and generated, and other. When a file lands in the wrong group, set its
+`"role"` on the file's object: `domain`, `persistence`, `logic`, `interfaces`,
+`surface`, `tests`, `docs`, `config` or `other`.
 
 **`lines`** — a feature shows the reviewer only its own changes, so when a
 file serves more than one feature, every feature that lists it says which of
