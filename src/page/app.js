@@ -32,7 +32,7 @@
   let submitted = false;
   let showDiff = true;                         // reworked prose shows what it said beside what it says
   let current = location.hash.slice(1) || (data.features[0] && data.features[0].id);
-  const expanded = {};                         // featureId -> Set of file paths open in the diff
+  const expanded = {};                         // featureId -> Map of file path -> open, where the reviewer toggled it
   const entry = (id) => (state[id] ||= { comments: [] }, state[id].comments ||= [], state[id]);
   const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -74,9 +74,49 @@
   // rather than only that something moved.
   const LINE_CAP = 4000;                            // beyond this a file keeps its hash but not its lines
   const hashStr = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
-  const fhash = (file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null;
-  const flatLines = (file) => file.hunks ? file.hunks.flatMap(h => h.lines.map(l => l.t + l.text)) : null;
-  const fileShot = (file) => { const lines = flatLines(file); return { h: fhash(file), lines: lines && lines.length <= LINE_CAP ? lines : null }; };
+  const owned = new Map();
+  data.features.forEach((f, i) => (f.files || []).forEach(file => {
+    if (!file.own) return;
+    if (!owned.has(file.path)) owned.set(file.path, { new: new Map(), old: new Map() });
+    const o = owned.get(file.path);
+    for (const side of ['new', 'old']) for (const n of file.own[side]) o[side].set(n, [...(o[side].get(n) || []), i]);
+  }));
+  const shares = new WeakMap();
+  function shareOf(file) {
+    if (!file.own || !file.hunks) return null;
+    if (shares.has(file)) return shares.get(file);
+    const mine = { new: new Set(file.own.new), old: new Set(file.own.old) }, all = owned.get(file.path);
+    const sideOf = (l) => l.t === '+' ? 'new' : 'old', numOf = (l) => l.t === '+' ? l.new : l.old;
+    const self = data.features.findIndex(f => (f.files || []).includes(file));
+    const others = [...new Set([...all.new.values(), ...all.old.values()].flat())].filter(i => i !== self).sort((a, b) => a - b);
+    const ownersAt = (side, n) => all[side].get(n) || [];
+    const aloneAt = (side, n) => mine[side].has(n) && ownersAt(side, n).length === 1;
+    const sh = {
+      mine, others, self, add: mine.new.size, del: mine.old.size,
+      owns: (l) => l.t !== ' ' && mine[sideOf(l)].has(numOf(l)),
+      owners: (l) => l.t === ' ' ? [] : ownersAt(sideOf(l), numOf(l)),
+      alone: (l) => l.t !== ' ' && aloneAt(sideOf(l), numOf(l)),
+      span: (side, u) => { const out = new Set(); for (let n = u.from; n <= u.to; n++) ownersAt(side, n).forEach(i => i !== self && out.add(i)); return out; },
+      touches: (side, u) => { for (let n = u.from; n <= u.to; n++) if (mine[side].has(n)) return true; return false; },
+      touchesAlone: (side, u) => { for (let n = u.from; n <= u.to; n++) if (aloneAt(side, n)) return true; return false; },
+    };
+    sh.exAdd = [...mine.new].filter(n => aloneAt('new', n)).length;
+    sh.exDel = [...mine.old].filter(n => aloneAt('old', n)).length;
+    sh.hasAlone = sh.exAdd + sh.exDel > 0;
+    sh.main = (l) => sh.hasAlone ? sh.alone(l) : sh.owns(l);
+    shares.set(file, sh);
+    return sh;
+  }
+  const lineKind = (sh, l) => !sh || l.t === ' ' ? '' : !sh.owns(l) ? 'foreign' : sh.alone(l) ? 'mine' : 'shared';
+  const featureName = (i) => `${i + 1}. ${data.features[i].title}`;
+  const ownerNames = (list) => [...list].sort((a, b) => a - b).map(featureName).join(' · ');
+  const ownerRefs = (list) => [...list].sort((a, b) => a - b).map(i => i + 1).join(', ');
+  const ownerTag = (list, also = false) => `<span class="whose${also ? ' also' : ''}" title="${esc(`${also ? 'Also claimed by' : 'Belongs to'} ${ownerNames(list)}`)}">${also ? 'also ' : ''}${[...list].sort((a, b) => a - b).map(i => i + 1).join('·')}</span>`;
+
+  const wholeHash = (file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null;
+  const flatLines = (file) => { const sh = shareOf(file); return file.hunks ? file.hunks.flatMap(h => h.lines.filter(l => !sh || sh.owns(l)).map(l => l.t + l.text)) : null; };
+  const fhash = (file) => shareOf(file) ? hashStr(JSON.stringify(flatLines(file))) : wholeHash(file);
+  const fileShot = (file) => { const lines = flatLines(file); return { h: fhash(file), lines: lines && lines.length <= LINE_CAP ? lines : null, ...(shareOf(file) ? { own: true } : {}) }; };
   const textOf = (f) => ({ scenario: f.scenario || '', description: f.description || '', tested: f.tested || '' });
   const entityShots = (f) => Object.fromEntries((f.entities || []).map(e => [e.name, hashStr(JSON.stringify(e))]));
   const shot = (f) => ({
@@ -85,7 +125,14 @@
     files: Object.fromEntries((f.files || []).map(file => [file.path, fileShot(file)])),
   });
   const seenOf = (f) => entry(f.id).seen;
-  const isViewed = (f, file) => { const v = entry(f.id).viewed ||= {}; return file.path in v && v[file.path] === fhash(file); };
+  const isViewed = (f, file) => {
+    const v = entry(f.id).viewed ||= {};
+    if (!(file.path in v)) return false;
+    if (v[file.path] === fhash(file)) return true;
+    if (!shareOf(file)) return false;
+    const was = seenOf(f)?.files?.[file.path];
+    return v[file.path] === wholeHash(file) || (!!was && !was.own && v[file.path] === was.h && !(file.path in sinceOf(f).files));
+  };
   const viewedCount = (f) => { const files = f.files || []; return { seen: files.filter(x => isViewed(f, x)).length, total: files.length }; };
   function toggleViewed(f, file, on = !isViewed(f, file)) {
     const e = entry(f.id), v = e.viewed ||= {};
@@ -95,7 +142,7 @@
       const s = e.seen ||= { at: Date.now(), head: data.pr.head || 'plan', files: {} };
       (s.files ||= {})[file.path] = fileShot(file);
     } else delete v[file.path];
-    if (on) expanded[f.id]?.delete(file.path);      // like GitHub: a viewed file folds
+    expanded[f.id]?.delete(file.path);              // like GitHub: a viewed file folds
     save(); render(); renderFocus();
   }
 
@@ -127,8 +174,11 @@
     for (const file of f.files || []) {
       const was = s.files?.[file.path];
       if (!was || was.h === fhash(file)) continue;
+      const wholeShot = !!shareOf(file) && !was.own;
+      if (wholeShot && was.h === wholeHash(file)) continue;
       const fresh = freshLines(flatLines(file), was.lines);
-      out.files[file.path] = { fresh, added: fresh ? fresh.filter(Boolean).length : null, gone: fresh ? fresh.gone : null };
+      if (wholeShot && fresh && was.lines && !fresh.some(Boolean)) continue;
+      out.files[file.path] = { fresh, added: fresh ? fresh.filter(Boolean).length : null, gone: fresh && !wholeShot ? fresh.gone : null };
       out.any = true;
     }
     return out;
@@ -246,12 +296,27 @@
     });
   }
 
+  const OPEN_UP_TO = 150;
+  const shownSize = (file) => {
+    const sh = shareOf(file);
+    return sh ? (sh.hasAlone ? sh.exAdd + sh.exDel : sh.add + sh.del) : (file.add || 0) + (file.del || 0);
+  };
+  const isOpen = (f, file) => expanded[f.id]?.get(file.path) ?? (!!file.hunks?.length && !isViewed(f, file) && shownSize(file) <= OPEN_UP_TO);
   function fileBlock(f, file) {
-    const open = expanded[f.id]?.has(file.path), seen = isViewed(f, file), ch = sinceOf(f).files[file.path];
+    const open = isOpen(f, file), seen = isViewed(f, file), ch = sinceOf(f).files[file.path];
     const upd = !!ch, chip = ch?.added != null ? `${ch.added} new line${ch.added === 1 ? '' : 's'}${ch.gone ? `, ${ch.gone} gone` : ''}` : 'updated since your last look';
-    const stat = file.hunks ? `<span class="stat"><span class="a">+${file.add}</span> <span class="d">−${file.del}</span></span>` : '';
+    const sh = shareOf(file);
+    const counts = (a, d) => `<span class="a">+${a}</span> <span class="d">−${d}</span>`;
+    const sharedAdd = sh ? sh.add - sh.exAdd : 0, sharedDel = sh ? sh.del - sh.exDel : 0;
+    const stat = !file.hunks ? '' : sh
+      ? `<span class="stat">${sh.hasAlone ? counts(sh.exAdd, sh.exDel) : ''}${sharedAdd + sharedDel ? `<span class="shared" title="${esc(`Lines this feature shares with ${ownerNames(sh.others)}`)}">+${sharedAdd} −${sharedDel} shared</span>` : ''}<span class="of">of +${file.add} −${file.del}</span></span>`
+      : `<span class="stat">${counts(file.add, file.del)}</span>`;
+    const also = sh?.others.length ? `<span class="also" title="${esc(`Also changed by ${ownerNames(sh.others)}`)}">also in ${sh.others.map(i =>
+      `<a href="#${esc(data.features[i].id)}" target="_self" onclick="event.stopPropagation()">${i + 1}</a>`).join(' ')}</span>` : '';
+    const firstLine = sh && file.hunks.flatMap(h => h.lines).find(l => sh.main(l));
+    const url = firstLine ? `${file.url}${firstLine.t === '+' ? `R${firstLine.new}` : `L${firstLine.old}`}` : file.url;
     return `<div class="file ${seen ? 'seen' : ''}" data-path="${esc(file.path)}">
-      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${mdToggle(file)}${stat}<a href="${esc(file.url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
+      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${mdToggle(file)}${also}${stat}<a href="${esc(url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
       ${open ? fileBody(f, file) : ''}
     </div>`;
   }
@@ -286,27 +351,86 @@
     if (!file.hunks.length) return `<p class="none" style="padding:8px 12px">${file.status === 'binary' ? 'Binary file.' : 'No text changes.'}</p>`;
     const cs = entry(f.id).comments.filter(c => c.kind === 'line' && c.file === file.path);
     const lang = langOf(file.path);
-    const fresh = sinceOf(f).files[file.path]?.fresh;        // lines the reviewer has not seen
+    const fresh = freshFlags(f, file);                        // lines the reviewer has not seen
     // A comment on a line no row below shows is listed above the rows instead of vanishing: one made on an
     // unchanged block in the rendered view, or one whose line the author's rework moved out of the diff.
     const rows = new Set(file.hunks.flatMap(h => h.lines.map(l => l.t === '-' ? `old ${l.old}` : `new ${l.new}`)));
     const outside = cs.filter(c => !rows.has(`${c.side} ${c.line}`)).map(c =>
       `<div class="lc outside"><div class="who">${c.side === 'old' ? 'old ' : ''}line ${c.line}, outside the diff<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
-    let fi = 0;
-    return outside + file.hunks.map(h => {
+    const sh = shareOf(file);
+    const lines = file.hunks.flatMap((h, hi) => {
       const oh = hlLines(h.lines.filter(l => l.t !== '+').map(l => l.text).join('\n'), lang);
       const nh = hlLines(h.lines.filter(l => l.t !== '-').map(l => l.text).join('\n'), lang);
       let oi = 0, ni = 0;
-      return `<div class="hunk"><div class="hh">${esc(h.header)}</div>${h.lines.map(l => {
-        const side = l.t === '-' ? 'old' : 'new', line = l.t === '-' ? l.old : l.new;
-        const code = l.t === '-' ? oh[oi++] : l.t === '+' ? nh[ni++] : (oi++, nh[ni++]);
-        const mine = cs.filter(c => c.side === side && c.line === line);
-        const isNew = fresh?.[fi++];
-        return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${mine.length ? 'has' : ''} ${isNew ? 'fresh' : ''}" data-side="${side}" data-line="${line}" ${isNew ? 'title="New since your last look"' : ''}>
-          <span class="g">${l.old ?? ''}</span><span class="g">${l.new ?? ''}</span><span class="code"><span class="sign">${l.t}</span>${code}</span></div>` +
-          mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
-      }).join('')}</div>`;
-    }).join('');
+      return h.lines.map(l => ({ l, hi, side: l.t === '-' ? 'old' : 'new', line: l.t === '-' ? l.old : l.new, code: l.t === '-' ? oh[oi++] : l.t === '+' ? nh[ni++] : (oi++, nh[ni++]) }));
+    });
+    const pinned = lines.map(x => !sh || sh.main(x.l) || cs.some(c => c.side === x.side && c.line === x.line));
+    const near = lines.map(() => !sh);
+    for (const order of sh ? [lines.map((_, i) => i), lines.map((_, i) => lines.length - 1 - i)] : []) {
+      let at = null;
+      for (const i of order) {
+        if (pinned[i]) at = i;
+        if (at !== null && lines[at].hi === lines[i].hi && Math.abs(i - at) <= 3) near[i] = true;
+      }
+    }
+    const whoElse = (l) => sh.owners(l).filter(o => o !== sh.self);
+    const runKey = (i) => {
+      const kind = lineKind(sh, lines[i].l);
+      return kind === 'foreign' || kind === 'shared' ? `${kind} ${whoElse(lines[i].l).join()}` : null;
+    };
+    const row = (i, tagged) => {
+      const { l, side, line, code } = lines[i];
+      const mine = cs.filter(c => c.side === side && c.line === line);
+      const kind = lineKind(sh, l);
+      const isNew = fresh?.[i];
+      return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${kind} ${mine.length ? 'has' : ''} ${isNew ? 'fresh' : ''}" data-side="${side}" data-line="${line}" ${isNew ? 'title="New since your last look"' : ''}>
+          <span class="g">${l.old ?? ''}</span><span class="g">${l.new ?? ''}</span><span class="code"><span class="sign">${l.t}</span>${code}</span>${tagged ? ownerTag(whoElse(l), kind === 'shared') : ''}</div>` +
+        mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
+    };
+    const foldKey = (i) => `${f.id}\n${file.path}\n${i}`;
+    const fold = (i, j) => {
+      const shared = new Set(), theirs = new Set(); let ns = 0, nf = 0;
+      for (let k = i; k < j; k++) {
+        const l = lines[k].l, kind = lineKind(sh, l);
+        if (kind === 'shared') { ns++; whoElse(l).forEach(o => shared.add(o)); }
+        else if (kind === 'foreign') { nf++; whoElse(l).forEach(o => theirs.add(o)); }
+      }
+      const s = (n) => n === 1 ? '' : 's';
+      const parts = [
+        ...(ns ? [`${ns} changed line${s(ns)} shared with ${ownerRefs(shared)}`] : []),
+        ...(nf ? [`${nf} changed line${s(nf)} of ${ownerRefs(theirs)}`] : []),
+      ];
+      return `<button type="button" class="fold" data-fold="${esc(foldKey(i))}" title="${esc(ownerNames(new Set([...shared, ...theirs])))}">⋯ ${esc(parts.length ? parts.join(' · ') : `${j - i} unchanged lines`)}</button>`;
+    };
+    let out = '', open = null;
+    const headed = new Set();
+    const close = () => { if (open !== null) { out += '</div>'; open = null; } };
+    const enter = (hi) => {
+      if (open === hi) return;
+      close();
+      out += `<div class="hunk">${headed.has(hi) ? '' : `<div class="hh">${esc(file.hunks[hi].header)}</div>`}`;
+      headed.add(hi); open = hi;
+    };
+    for (let i = 0; i < lines.length;) {
+      let j = i + 1;
+      if (!near[i]) while (j < lines.length && !near[j]) j++;
+      if (!near[i] && j - i >= 4 && !unfolded.has(foldKey(i))) { close(); out += fold(i, j); i = j; continue; }
+      for (; i < j; i++) {
+        const key = runKey(i), same = key && open === lines[i].hi && i > 0 && lines[i - 1].hi === lines[i].hi && runKey(i - 1) === key;
+        enter(lines[i].hi);
+        out += row(i, key && !same);
+      }
+    }
+    close();
+    return outside + out;
+  }
+  const unfolded = new Set();
+  function freshFlags(f, file) {
+    const fresh = sinceOf(f).files[file.path]?.fresh;
+    if (!fresh || !file.hunks) return null;
+    const sh = shareOf(file);
+    let k = 0;
+    return file.hunks.flatMap(h => h.lines.map(l => !sh || sh.owns(l) ? !!fresh[k++] : false));
   }
 
   const MARKDOWN = /\.(md|markdown|mdx)$/i;
@@ -478,7 +602,17 @@
     const lang = n.type === 'front' ? 'yaml' : n.type === 'raw' ? 'markdown' : (n.token.lang || '').split(/\s/)[0];
     const known = window.hljs?.getLanguage(lang) ? lang : null;
     const a = linesOf(o), b = linesOf(n), ha = hlLines(a.join('\n'), known), hb = hlLines(b.join('\n'), known);
-    return `<pre class="rd-lines"><code>${lcsOps(a, b).map(([kind, i, j]) => `<span class="ln ${kind}">${kind === 'del' ? ha[i] : hb[j]}</span>`).join('')}</code></pre>`;
+    const ops = lcsOps(a, b), line = ([kind, i, j]) => `<span class="ln ${kind}">${kind === 'del' ? ha[i] : hb[j]}</span>`;
+    const near = ops.map((_, k) => ops.slice(Math.max(0, k - 2), k + 3).some(([kind]) => kind !== 'same'));
+    let out = '';
+    for (let k = 0; k < ops.length;) {
+      let m = k + 1;
+      if (!near[k]) while (m < ops.length && !near[m]) m++;
+      const run = ops.slice(k, m).map(line).join('');
+      out += !near[k] && m - k >= 4 ? `<button type="button" class="rd-gap">⋯ ${m - k} unchanged lines</button><span hidden>${run}</span>` : run;
+      k = m;
+    }
+    return `<pre class="rd-lines"><code>${out}</code></pre>`;
   }
   function entryHtml(e) {
     if (e.kind !== 'mod') return unitHtml(e.kind === 'del' ? e.old : e.new);
@@ -519,6 +653,8 @@
     root.querySelectorAll('[data-mdview]').forEach(b => b.onclick = (e) => { e.stopPropagation(); if (!b.disabled) setMdView(b.dataset.mdview); });
     root.querySelectorAll('.rd-u > .rc').forEach(b => b.onclick = () => { if (!submitted) openLineComposer(f, b.parentElement, redraw); });
     root.querySelectorAll('.rd-more').forEach(b => b.onclick = () => { richOpen.add(b.dataset.more); redraw(); });
+    root.querySelectorAll('.fold').forEach(b => b.onclick = (e) => { e.stopPropagation(); unfolded.add(b.dataset.fold); redraw(); });
+    root.querySelectorAll('.rd-gap').forEach(b => b.onclick = (e) => { e.stopPropagation(); b.nextElementSibling.hidden = false; b.remove(); });
   }
 
   function richDiff(f, file) {
@@ -531,33 +667,61 @@
       if (at < 0) at = Math.max(rows.findIndex(e => unitOn(e, c.side)), 0);
       own.set(at, [...(own.get(at) || []), c]);
     }
-    const fresh = sinceOf(f).files[file.path]?.fresh, unseen = { old: new Set(), new: new Set() };
+    const fresh = freshFlags(f, file), unseen = { old: new Set(), new: new Set() };
     if (fresh) { let fi = 0; for (const h of file.hunks) for (const l of h.lines) if (fresh[fi++]) l.t === '-' ? unseen.old.add(l.old) : unseen.new.add(l.new); }
     const isFresh = (e) => ['old', 'new'].some(side => {
       const u = unitOn(e, side);
       for (let n = u?.from; u && n <= u.to; n++) if (unseen[side].has(n)) return true;
       return false;
     });
-    const changed = rows.map((e, i) => e.kind !== 'same' || own.has(i));
+    const sh = shareOf(file);
+    const ownIn = (e) => (e.new && sh.touches('new', e.new)) || (e.old && sh.touches('old', e.old));
+    const aloneIn = (e) => (e.new && sh.touchesAlone('new', e.new)) || (e.old && sh.touchesAlone('old', e.old));
+    const rowKind = (e) => !sh || e.kind === 'same' ? '' : !ownIn(e) ? 'foreign' : aloneIn(e) ? 'mine' : 'shared';
+    const theirsOf = (e) => new Set([...(e.new ? sh.span('new', e.new) : []), ...(e.old ? sh.span('old', e.old) : [])]);
+    const isMain = (e) => e.kind !== 'same' && (!sh || (sh.hasAlone ? aloneIn(e) : ownIn(e)));
+    const changed = rows.map((e, i) => isMain(e) || own.has(i));
     const near = rows.map((_, i) => changed.slice(Math.max(0, i - 2), i + 3).some(Boolean));
+    const foldKey = (i) => `${f.id}\n${file.path}#${i}`;
     const folded = new Map();
     for (let i = 0; i < rows.length;) {
       if (near[i]) { i++; continue; }
       let j = i; while (j < rows.length && !near[j]) j++;
-      if (j - i >= 3 && !richOpen.has(`${file.path}#${i}`)) folded.set(i, j);
+      if (j - i >= 3 && !richOpen.has(foldKey(i))) folded.set(i, j);
       i = j;
     }
     const row = (i, tag) => {
       const e = rows[i], side = e.kind === 'del' ? 'old' : 'new', u = unitOn(e, side), nw = isFresh(e);
+      const kind = rowKind(e);
       const notes = (own.get(i) || []).map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
-      return `<${tag} class="rd-u ${e.kind} t-${u.type}${nw ? ' fresh' : ''}" data-side="${side}" data-line="${u.from}"${nw ? ' title="New since your last look"' : ''}>`
-        + `${submitted ? '' : '<button type="button" class="rc" title="Comment on this">+</button>'}${entryHtml(e)}${tag === 'li' ? notes : ''}</${tag}>${tag === 'li' ? '' : notes}`;
+      const body = kind === 'foreign' ? `${ownerTag(theirsOf(e))}<div class="dim">${entryHtml(e)}</div>`
+        : kind === 'shared' ? `${ownerTag(theirsOf(e), true)}${entryHtml(e)}` : entryHtml(e);
+      return `<${tag} class="rd-u ${e.kind}${kind ? ` ${kind}` : ''} t-${u.type}${nw ? ' fresh' : ''}" data-side="${side}" data-line="${u.from}"${nw ? ' title="New since your last look"' : ''}>`
+        + `${submitted ? '' : '<button type="button" class="rc" title="Comment on this">+</button>'}${body}${tag === 'li' ? notes : ''}</${tag}>${tag === 'li' ? '' : notes}`;
+    };
+    const foldLabel = (i, n) => {
+      const shared = new Set(), theirs = new Set(); let ns = 0, nf = 0;
+      for (let k = i; k < i + n; k++) {
+        const kind = rowKind(rows[k]);
+        if (kind === 'shared') { ns++; theirsOf(rows[k]).forEach(o => shared.add(o)); }
+        else if (kind === 'foreign') { nf++; theirsOf(rows[k]).forEach(o => theirs.add(o)); }
+      }
+      const s = (x) => x === 1 ? '' : 's', rest = n - ns - nf;
+      return {
+        title: ownerNames(new Set([...shared, ...theirs])),
+        text: [
+          ...(ns ? [`${ns} changed block${s(ns)} shared with ${ownerRefs(shared)}`] : []),
+          ...(nf ? [`${nf} changed block${s(nf)} of ${ownerRefs(theirs)}`] : []),
+          ...(rest ? [`${rest} unchanged block${s(rest)}`] : []),
+        ].join(' · '),
+      };
     };
     const out = [];
     for (let i = 0; i < rows.length;) {
       if (folded.has(i)) {
         const n = folded.get(i) - i;
-        out.push(`<button type="button" class="rd-more" data-more="${esc(`${file.path}#${i}`)}">⋯ ${n} unchanged block${n === 1 ? '' : 's'}</button>`);
+        const label = foldLabel(i, n);
+        out.push(`<button type="button" class="rd-more" data-more="${esc(foldKey(i))}"${label.title ? ` title="${esc(label.title)}"` : ''}>⋯ ${esc(label.text)}</button>`);
         i += n; continue;
       }
       const u = rows[i].new ?? rows[i].old;
@@ -568,6 +732,59 @@
       out.push(u.list.ordered ? `<ol${start !== 1 ? ` start="${start}"` : ''}>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`);
     }
     return `<div class="rd">${out.join('')}</div>`;
+  }
+
+  function findPlain(hay, phrase) {
+    const map = [], chars = [];
+    for (let i = 0; i < hay.length; i++) {
+      const c = hay[i];
+      if (/[`*_]/.test(c)) continue;
+      if (/\s/.test(c)) { if (!chars.length || chars[chars.length - 1] === ' ') continue; chars.push(' '); map.push(i); continue; }
+      chars.push(c); map.push(i);
+    }
+    const norm = chars.join(''), needle = phrase.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim(), out = [];
+    for (let at = needle ? norm.indexOf(needle) : -1; at >= 0; at = norm.indexOf(needle, at + needle.length)) out.push([map[at], map[at + needle.length - 1] + 1]);
+    return out;
+  }
+  function textSegments(root, keep) {
+    const segs = [], walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let pos = 0;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.parentElement.closest('.rc, .whose, .lc, .sign') || !keep(n)) continue;
+      segs.push({ n, s: pos, e: pos += n.data.length });
+    }
+    return { segs, text: segs.map(x => x.n.data).join('') };
+  }
+  function paint(seg, ranges, changed) {
+    const inside = (a, b) => ranges.some(([x, y]) => a >= x && b <= y);
+    const pieces = [{ node: seg.n, s: seg.s }];
+    for (const c of [...new Set(ranges.flat())].filter(c => c > seg.s && c < seg.e).sort((a, b) => b - a)) pieces.splice(1, 0, { node: seg.n.splitText(c - seg.s), s: c });
+    pieces.forEach((p, k) => {
+      const cls = inside(p.s, k + 1 < pieces.length ? pieces[k + 1].s : seg.e) ? 'ph' : changed ? 'ph-other' : null;
+      if (!cls || !p.node.data) return;
+      const span = document.createElement('span');
+      span.className = cls;
+      p.node.before(span); span.append(p.node);
+    });
+  }
+  function markPhrases(root, f) {
+    for (const el of root.querySelectorAll('.file[data-path]')) {
+      const phrases = (f.files || []).find(x => x.path === el.dataset.path)?.phrases;
+      if (!phrases?.length) continue;
+      for (const row of el.querySelectorAll('.dl.add:not(.foreign), .dl.del:not(.foreign)')) {
+        const { segs, text } = textSegments(row.querySelector('.code'), () => true);
+        const ranges = phrases.flatMap(p => findPlain(text, p));
+        segs.forEach(seg => paint(seg, ranges, false));
+      }
+      for (const row of el.querySelectorAll('.rd-u:not(.foreign):not(.same)')) {
+        const inDel = (n) => !!n.parentElement.closest('del'), inIns = (n) => !!n.parentElement.closest('ins');
+        const now = textSegments(row, n => !inDel(n)), was = textSegments(row, n => !inIns(n));
+        const nowRanges = phrases.flatMap(p => findPlain(now.text, p)), wasRanges = phrases.flatMap(p => findPlain(was.text, p));
+        if (!nowRanges.length && !wasRanges.length) continue;
+        now.segs.forEach(seg => paint(seg, nowRanges, inIns(seg.n)));
+        was.segs.filter(seg => inDel(seg.n)).forEach(seg => paint(seg, wasRanges, true));
+      }
+    }
   }
 
   function commentList(f) {
@@ -588,7 +805,10 @@
     const diagrams = (f.diagrams || []).length
       ? f.diagrams.map((d, i) => `<figure><div class="diagram"><button class="fs" type="button" title="Full screen" aria-label="Full screen">⛶</button><pre class="mermaid" id="mm-${i}">${esc(d.mermaid)}</pre></div><figcaption>${esc(d.title || '')}</figcaption></figure>`).join('')
       : `<p class="none">No flow or boundary change, so no diagram.</p>`;
-    const files = (f.files || []).map(file => fileBlock(f, file)).join('');
+    const { groups } = reading(f);
+    const files = groups.length > 1
+      ? groups.map(g => `<div class="fgroup">${esc(g.label)}<span>${g.files.length}</span></div>${g.files.map(file => fileBlock(f, file)).join('')}`).join('')
+      : (f.files || []).map(file => fileBlock(f, file)).join('');
     const dis = submitted ? 'disabled' : '';
     const v = viewedCount(f);
     const ch = sinceOf(f), upd = changedSince(f);
@@ -644,8 +864,8 @@
     main.querySelector('.decide textarea').onblur = (e) => { if (state[f.id]) { state[f.id].note = e.target.value; save(); } };
 
     main.querySelectorAll('.file > .fh').forEach(h => h.onclick = () => {
-      const p = h.parentElement.dataset.path; const set = (expanded[f.id] ||= new Set());
-      set.has(p) ? set.delete(p) : set.add(p); render();
+      const file = f.files.find(x => x.path === h.parentElement.dataset.path);
+      (expanded[f.id] ||= new Map()).set(file.path, !isOpen(f, file)); render();
     });
     const hl = main.querySelector('.since .hl input');
     if (hl) hl.onchange = () => { showDiff = hl.checked; render(); };
@@ -666,6 +886,7 @@
       editors.forEach(ed => ed.layout());
     });
     highlight(f);
+    markPhrases(main, f);
     monacoReady.then(() => { if (data.features.find(x => x.id === current) === f) mountEditors(f); });
     if ((f.diagrams || []).length) {
       try { await mermaid.run({ nodes: main.querySelectorAll('pre.mermaid') }); }
@@ -699,13 +920,16 @@
   // reached through, the surface, and last the tests and generated files that only confirm the rest.
   const ORDER = [
     ['domain', 'Domain types'], ['data', 'Persistence'], ['logic', 'Logic'],
-    ['edge', 'Interfaces'], ['ui', 'Surface'], ['test', 'Tests'], ['config', 'Config and generated'],
+    ['edge', 'Interfaces'], ['ui', 'Surface'], ['test', 'Tests'], ['docs', 'Docs'], ['config', 'Config and generated'],
   ];
   const entityFiles = (f) => new Set((f.entities || []).map(e => e.file).filter(Boolean));
   function groupOf(f, path) {
-    if (/(^|[\/._-])(tests?|specs?|__tests__|__mocks__|fixtures?|snapshots?)([\/._-]|$)/i.test(path)) return 'test';
-    if (/(^|\/)(package-lock|bun\.lock|yarn\.lock|pnpm-lock|go\.sum|cargo\.lock)|\.(lock|ya?ml|toml|ini|cfg|env)$|(^|\/)(dockerfile|makefile)/i.test(path)) return 'config';
     if (entityFiles(f).has(path)) return 'domain';
+    if (/(^|[\/._-])(tests?|specs?|__tests__|__mocks__|fixtures?|snapshots?)([\/._-]|$)/i.test(path)) return 'test';
+    if (/\.(md|mdx|markdown|rst|adoc)$/i.test(path)) return 'docs';
+    if (/(^|\/)(package-lock|bun\.lock|yarn\.lock|pnpm-lock|go\.sum|cargo\.lock)|\.(lock|ya?ml|toml|ini|cfg|env|json|jsonc)$|(^|\/)(dockerfile|makefile)|(^|\/)(gen|generated|__generated__)\//i.test(path)) return 'config';
+    if (/\.(proto|graphql|gql)$/i.test(path)) return 'edge';
+    if (/\.(png|jpe?g|gif|webp|ico|avif|woff2?|ttf|otf)$/i.test(path)) return 'ui';
     if (/(^|[\/._-])(entit|model|schema|domain|dto|types?)([\/._-]|$)/i.test(path)) return 'domain';
     if (/(^|[\/._-])(repositor|store|dao|database|db|migrations?|quer|sql|prisma|persist)/i.test(path)) return 'data';
     if (/(^|[\/._-])(route|router|api|endpoint|controller|cli|command|serve|server|middleware)/i.test(path)) return 'edge';
@@ -784,6 +1008,7 @@
       <div class="file" data-path="${esc(file.path)}">${fileBody(f, file)}</div>`;
     code.scrollTop = keep;
     focusShown = shown;
+    markPhrases(code, f);
     focus.querySelector('.mdbox').innerHTML = mdToggle(file);
     code.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row, renderFocus); });
     bindRendered(focus, f, renderFocus);

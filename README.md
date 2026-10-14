@@ -93,6 +93,22 @@ and the page degrades to file links.
   syntax-highlighted diff, and how it was tested.
 - **Viewed** — a checkbox on each file in the diff, as on GitHub. Checking
   it folds the file; the Diff heading counts them.
+- **A file several features change** shows each feature only its own lines.
+  The header counts them against the whole file (`+11 −0 of +193 −4`) and
+  links the other features that change it (`also in 2 3`). Hunks that belong
+  to other features fold behind a bar that names them, and a click unfolds
+  them. Inside a shared hunk, another feature's lines stay in place as
+  context, dimmed, tagged with that feature's number. The feature's own lines
+  carry a blue stripe; lines it shares with another feature are lighter, say
+  `also 3`, and fold when they sit away from its own lines, like test setup
+  several features claim. A feature's `phrases` are highlighted inside a
+  shared paragraph, and the other features' edits there are dimmed. Rendered
+  Markdown does the same block by block. Unviewed files open by default unless
+  the feature's part of them runs past 150 lines, and files are grouped the
+  way Focus review reads them, with Markdown under Docs.
+  Viewed, *updated* and the new-line gutter follow the feature's own lines,
+  so a rework of one feature's part of a file leaves the other features
+  alone. **GitHub ↗** opens the file at the feature's first line.
 - **Focus review** — the button in the Diff heading opens one file at a time,
   full screen, starting at the first you have not viewed. The rail on the
   left groups the feature's files in the order worth reading them: the domain
@@ -181,7 +197,7 @@ Exit code is `0` unless you ask for it to mean something:
 |---|---|
 | default | `0` for any outcome |
 | `--require-approval` | `0` approved, `1` anything else |
-| always | `2` when zreview could not run: bad `review.json`, a diagram Mermaid cannot parse, missing screenshot, existing `--result-file` |
+| always | `2` when zreview could not run: bad `review.json`, a diagram Mermaid cannot parse, a changed line no feature claims, missing screenshot, existing `--result-file` |
 
 The `2` fires before any server starts, so a bad invocation never opens a tab.
 
@@ -265,6 +281,28 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
   matched against the diff for inline hunks. When a diff is available every
   changed file must be claimed by a feature and every listed file must be in
   the diff; otherwise zreview exits `2` naming the files, before any tab opens.
+- A file several features list says whose each change is. Every feature
+  that lists it writes it as an object with `lines`: line numbers as they are
+  at `pr.head`, a range as `"550-558"`, and a removed line as `"old:45"`:
+
+  ```json
+  "files": [
+    { "path": "src/entities/field-management.ts", "lines": ["550-558", "587-588"] },
+    "src/api/write.spec.ts"
+  ]
+  ```
+
+  Every changed line needs a feature, and a line may have two. A removed line
+  goes with the lines added in its place when those all belong to the same
+  features; otherwise claim it as `old:N`, which also overrides that default.
+  When features share a line — a Markdown paragraph is one line — each names
+  the words of it that are its own with `"phrases": ["…"]`; a phrase must
+  appear in the feature's claimed lines.
+  zreview exits `2` before any tab opens when a feature that shares a file
+  gives no `lines`, a range names no changed line, or a changed line has no
+  feature. The error prints every file it rejects with its changed lines
+  numbered the way `lines` takes them, each tagged with the feature it goes
+  to now, so list the files first and claim from what it prints.
 
 ## Screenshots
 

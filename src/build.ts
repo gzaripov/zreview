@@ -17,7 +17,10 @@ export type Shots = { before?: string; after?: string; caption?: string; before_
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
 export type Hunk = { header: string; lines: DiffLine[] };
 export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
-export type FileRef = { path: string; url: string; hunks?: Hunk[]; add?: number; del?: number; status?: string; text?: { before: string; after: string } };
+export type FileRef = {
+  path: string; url: string; lines?: (string | number)[]; phrases?: string[]; own?: { new: number[]; old: number[] };
+  hunks?: Hunk[]; add?: number; del?: number; status?: string; text?: { before: string; after: string };
+};
 /** A field is what an entity consists of; an operation is what you can do with it. Both carry the reasoning, not just the type. */
 export type Part = { name: string; type?: string; meaning: string; why?: string; change?: "added" | "changed" | "removed" };
 export type Entity = {
@@ -85,6 +88,151 @@ export function parseUnifiedDiff(text: string): Map<string, FileDiff> {
 }
 
 export class ReviewError extends Error {}
+
+type Span = { side: "new" | "old"; from: number; to: number; raw: string };
+type Listing = { feature: Feature; ref: FileRef; spans?: Span[] };
+export type Ownership = { owners: Map<string, Map<DiffLine, string[]>>; problems: string[]; rejected: Set<string> };
+
+export const CLAIM_RULES =
+  `When several features list a file, each says which of its changed lines are its own: "lines": ["550-558", "587", "old:45"], ` +
+  `numbered as they are at pr.head, with old:N for a removed line. Every changed line needs a feature, and a line may have two. ` +
+  `A removed line goes with the lines added in its place when those all belong to the same features; claim it with old:N ` +
+  `when they do not, or to give it to another feature. When features share a line, such as one Markdown paragraph, ` +
+  `"phrases": ["…"] names the words of it this feature changed.`;
+
+function spanOf(raw: unknown): Span | null {
+  const m = /^(old:)?(\d+)(?:-(\d+))?$/.exec(String(raw).replace(/\s/g, ""));
+  if (!m) return null;
+  const from = Number(m[2]), to = Number(m[3] ?? m[2]);
+  return from > 0 && to >= from ? { side: m[1] ? "old" : "new", from, to, raw: String(raw) } : null;
+}
+
+const lineNo = (l: DiffLine) => (l.t === "+" ? l.new! : l.old!);
+const lineName = (l: DiffLine) => (l.t === "+" ? String(l.new) : `old:${l.old}`);
+
+function changeBlocks(diff: FileDiff): DiffLine[][] {
+  const blocks: DiffLine[][] = [];
+  for (const h of diff.hunks) {
+    let run: DiffLine[] = [];
+    for (const l of h.lines) {
+      if (l.t !== " ") { run.push(l); continue; }
+      if (run.length) blocks.push(run);
+      run = [];
+    }
+    if (run.length) blocks.push(run);
+  }
+  return blocks;
+}
+
+function lineRuns(lines: DiffLine[]): string {
+  const runs: DiffLine[][] = [];
+  for (const l of lines) {
+    const run = runs.at(-1), last = run?.at(-1);
+    if (run && last && last.t === l.t && lineNo(l) === lineNo(last) + 1) run.push(l);
+    else runs.push([l]);
+  }
+  const names = runs.map((run) => (run.length > 1 ? `${lineName(run[0]!)}-${lineNo(run.at(-1)!)}` : lineName(run[0]!)));
+  return names.length > 10 ? `${names.slice(0, 10).join(", ")} and ${names.length - 10} more` : names.join(", ");
+}
+
+export function numberedLines(path: string, diff: FileDiff, owners?: Map<DiffLine, string[]>): string {
+  const blocks = changeBlocks(diff).map((block) => block.map((l) => {
+    const who = owners ? `[${owners.get(l)?.join(", ") || "unclaimed"}] ` : "";
+    return `  ${lineName(l).padEnd(10)} ${l.t} ${who}${l.text.replaceAll("\t", "  ")}`;
+  }).join("\n"));
+  return `${path}\n${blocks.join("\n\n")}`;
+}
+
+const sameSet = <T>(a: Set<T>, b: Set<T>) => a.size === b.size && [...a].every((x) => b.has(x));
+const plain = (s: string) => s.replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+
+export function resolveOwnership(features: Feature[], diffs: Map<string, FileDiff>): Ownership {
+  const problems: string[] = [];
+  const rejected = new Set<string>();
+  const reject = (path: string, problem: string) => { problems.push(problem); if (diffs.get(path)?.hunks.length) rejected.add(path); };
+  const byPath = new Map<string, Listing[]>();
+  for (const feature of features) {
+    for (const ref of (feature.files ?? []) as FileRef[]) {
+      const listing: Listing = { feature, ref };
+      if (ref.lines !== undefined) {
+        listing.spans = [];
+        if (!Array.isArray(ref.lines) || !ref.lines.length) {
+          reject(ref.path, `feature ${feature.id}, ${ref.path}: "lines" must list at least one line or range, like ["550-558", "587", "old:45"]`);
+        }
+        for (const raw of Array.isArray(ref.lines) ? ref.lines : []) {
+          const span = spanOf(raw);
+          if (span) listing.spans.push(span);
+          else reject(ref.path, `feature ${feature.id}, ${ref.path}: ${JSON.stringify(raw)} is not a line or a range — write "550", "550-558", or "old:45" for a removed line`);
+        }
+      }
+      const same = byPath.get(ref.path);
+      if (same) same.push(listing);
+      else byPath.set(ref.path, [listing]);
+    }
+  }
+
+  const owners = new Map<string, Map<DiffLine, string[]>>();
+  for (const [path, listings] of byPath) {
+    const diff = diffs.get(path);
+    if (!diff?.hunks.length) continue;
+    const changed = diff.hunks.flatMap((h) => h.lines.filter((l) => l.t !== " "));
+    const checkPhrases = (x: Listing, mine: DiffLine[]) => {
+      const phrases = x.ref.phrases;
+      if (phrases === undefined) return;
+      if (!Array.isArray(phrases) || phrases.some((p) => typeof p !== "string" || !plain(p))) {
+        reject(path, `feature ${x.feature.id}, ${path}: "phrases" must list the words this feature changed, as strings`);
+        return;
+      }
+      for (const phrase of phrases) {
+        if (!mine.some((l) => plain(l.text).includes(plain(phrase)))) {
+          reject(path, `feature ${x.feature.id}, ${path}: phrase ${JSON.stringify(phrase)} is in none of the changed lines this feature claims`);
+        }
+      }
+    };
+    if (listings.length === 1 && !listings[0]!.spans) {
+      owners.set(path, new Map(changed.map((l) => [l, [listings[0]!.feature.id]])));
+      checkPhrases(listings[0]!, changed);
+      continue;
+    }
+    const silent = listings.filter((x) => !x.spans);
+    if (silent.length) {
+      reject(path, `${path}: listed by ${listings.length} features, and ${silent.map((x) => x.feature.id).join(", ")} ${silent.length === 1 ? "gives" : "give"} no "lines"`);
+    }
+
+    const own = new Map<DiffLine, Set<Listing>>();
+    const give = (l: DiffLine, x: Listing) => {
+      const set = own.get(l);
+      if (set) set.add(x);
+      else own.set(l, new Set([x]));
+    };
+    for (const x of listings) {
+      for (const span of x.spans ?? []) {
+        const hit = changed.filter((l) => (l.t === "+" ? "new" : "old") === span.side && lineNo(l) >= span.from && lineNo(l) <= span.to);
+        if (!hit.length) reject(path, `feature ${x.feature.id}, ${path}: "${span.raw}" names no ${span.side === "new" ? "added" : "removed"} line`);
+        for (const l of hit) give(l, x);
+      }
+    }
+    for (const block of changeBlocks(diff)) {
+      const added = block.filter((l) => l.t === "+").map((l) => own.get(l));
+      const first = added[0];
+      if (!first || !added.every((set) => set && sameSet(set, first))) continue;
+      for (const l of block) if (l.t === "-" && !own.has(l)) for (const x of first) give(l, x);
+    }
+
+    const unclaimed = changed.filter((l) => !own.has(l));
+    if (unclaimed.length && !silent.length) reject(path, `${path}: no feature claims ${lineRuns(unclaimed)}`);
+    for (const x of listings) {
+      const mine = changed.filter((l) => own.get(l)?.has(x));
+      checkPhrases(x, mine);
+      x.ref.own = {
+        new: mine.filter((l) => l.t === "+").map((l) => l.new!),
+        old: mine.filter((l) => l.t === "-").map((l) => l.old!),
+      };
+    }
+    owners.set(path, new Map(changed.map((l) => [l, [...(own.get(l) ?? [])].map((x) => x.feature.id)])));
+  }
+  return { owners, problems, rejected };
+}
 
 export const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path);
 
@@ -187,6 +335,11 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
     if (review.plan && (f.files ?? []).length) {
       problems.push(`feature ${f.id}: a plan lists no files — use \`zreview review\` (and drop "plan": true) now that the code exists`);
     }
+    for (const [i, file] of (f.files ?? []).entries()) {
+      if (typeof file !== "string" && typeof file?.path !== "string") {
+        problems.push(`feature ${f.id} file ${i + 1}: a path, or { "path": …, "lines": [ … ] }`);
+      }
+    }
     for (const e of f.entities ?? []) {
       const where = `feature ${f.id} entity ${e.name ?? "?"}`;
       // An entity with no instance is a declaration, not a domain type: the reviewer cannot picture what it holds.
@@ -222,7 +375,7 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   const diffs = opts.diffText ? parseUnifiedDiff(opts.diffText) : null;
   const claimed = new Set<string>();
   for (const f of review.features ?? []) {
-    f.files = (f.files ?? []).map((p) => (typeof p === "string" ? fileLink(review.pr, p) : p));
+    f.files = (f.files ?? []).map((p) => (typeof p === "string" ? fileLink(review.pr, p) : { ...fileLink(review.pr, p.path), ...p }));
     for (const ref of f.files as FileRef[]) {
       claimed.add(ref.path);
       const d = diffs?.get(ref.path);
@@ -235,11 +388,21 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   if (diffs) {
     const unclaimed = [...diffs.keys()].filter((p) => !claimed.has(p)).sort();
     const missing = [...claimed].filter((p) => !diffs.has(p)).sort();
+    const ownership = resolveOwnership(review.features, diffs);
     const problems = [
       ...unclaimed.map((p) => `${p}: changed in the PR but no feature lists it`),
       ...missing.map((p) => `${p}: listed by a feature but not changed in the PR`),
+      ...ownership.problems,
     ];
-    if (problems.length) throw new ReviewError(`${reviewPath}: ${problems.length} file${problems.length === 1 ? "" : "s"} out of step with the PR:\n  ${problems.join("\n  ")}`);
+    if (problems.length) {
+      const listing = [...ownership.rejected].map((p) => numberedLines(p, diffs.get(p)!, ownership.owners.get(p))).join("\n\n");
+      throw new ReviewError(`${reviewPath}: ${problems.length} problem${problems.length === 1 ? "" : "s"} with what the features claim of the PR:\n  ${problems.join("\n  ")}` +
+        (ownership.problems.length ? `\n\n${CLAIM_RULES}` : "") +
+        (listing ? `\n\nThe changed lines of ${ownership.rejected.size === 1 ? "that file" : "those files"}, numbered the way "lines" takes them, ` +
+          `with the feature each goes to now:\n\n${listing}` : ""));
+    }
+  } else if (review.features.some((f) => (f.files as FileRef[]).some((ref) => ref.lines))) {
+    log.push(`no diff, so the files' "lines" are not checked and every file shows as a link`);
   }
   const texts = new Map<string, Promise<FileRef["text"]>>();
   // A docs PR can change hundreds of Markdown files: fetch six at a time, not one gh process for each at once.

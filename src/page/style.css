@@ -158,7 +158,18 @@ body.zoomed { overflow: hidden; }
 .file > .fh .viewed input { margin: 0; accent-color: var(--ok); }
 .file.seen > .fh .path { color: var(--muted); }
 .file > .fh .tri { color: var(--muted); width: 1em; }
+.file > .fh .stat { display: inline-flex; gap: 6px; align-items: baseline; }
+.file > .fh .stat .of, .file > .fh .stat .shared { color: var(--muted); }
+.file > .fh .stat .shared { cursor: help; }
+.fgroup { display: flex; gap: 6px; align-items: baseline; margin: 18px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.section > h3 + .fgroup { margin-top: 0; }
+.fgroup span { font-weight: 400; }
+.file > .fh .also { font-size: 11px; color: var(--muted); white-space: nowrap; cursor: help; }
+.file > .fh .also a { font-size: 11px; font-weight: 600; text-decoration: none; padding: 0 2px; }
 .hunk { border-top: 1px solid var(--line); }
+.fold { display: block; width: 100%; padding: 4px 12px; border: 0; border-top: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; text-align: left; }
+.fold:hover { color: var(--fg); box-shadow: inset 3px 0 0 var(--accent); }
+.whose { position: absolute; top: 2px; right: 8px; padding: 0 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--muted); font: 600 10px/15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: help; }
 .mdview { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .mdview button, .focus .bar .mdview button { border: 0; border-radius: 0; padding: 2px 9px; background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 600; }
 .focus .bar .mdview button { padding: 5px 10px; font-size: 12px; }
@@ -175,6 +186,15 @@ body.zoomed { overflow: hidden; }
 .rd-u.fresh::after { content: "●"; position: absolute; left: -17px; top: 4px; font-size: 9px; color: var(--warn); }
 .rd-u > .rc { position: absolute; top: 3px; right: 3px; z-index: 1; width: 22px; height: 22px; padding: 0; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg); color: var(--accent); font-weight: 700; line-height: 1; opacity: 0; }
 .rd-u:hover > .rc, .rd-u > .rc:focus-visible { opacity: 1; }
+.rd-u.foreign { background: none; box-shadow: inset 3px 0 0 var(--line); }
+.rd .rd-u.foreign, .rd li.rd-u.foreign { padding-right: 64px; }
+.rd .rd-u.shared, .rd li.rd-u.shared { padding-right: 84px; }
+.rd-u.mine { box-shadow: inset 3px 0 0 var(--accent); }
+.rd-u.add.shared { background: color-mix(in srgb, var(--add-bg) 45%, var(--bg)); }
+.rd-u.del.shared { background: color-mix(in srgb, var(--del-bg) 45%, var(--bg)); }
+.rd-u > .dim { opacity: .5; }
+.rd-u > .dim > * { margin-top: 0; margin-bottom: 0; }
+.rd-u > .whose { top: 5px; right: 32px; }
 .rd ul, .rd ol { margin: 0 0 10px; padding-left: 2em; }
 .rd li.rd-u { margin: 0 0 2px; padding: 1px 8px; }
 .rd h1, .rd h2, .rd h3, .rd h4, .rd h5, .rd h6 { line-height: 1.25; }
@@ -192,6 +212,8 @@ body.zoomed { overflow: hidden; }
 .rd-lines .ln { display: block; min-height: 1.5em; margin: 0 -12px; padding: 0 12px; }
 .rd-lines .ln.del { background: var(--del-bg); box-shadow: inset 3px 0 0 var(--bad); }
 .rd-lines .ln.ins { background: var(--add-bg); box-shadow: inset 3px 0 0 var(--ok); }
+.rd-gap { display: block; width: calc(100% + 24px); margin: 0 -12px; padding: 0 12px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.rd-gap:hover { color: var(--fg); background: var(--bg); }
 .rd-more { display: block; width: 100%; margin: 0 0 10px; padding: 5px; border: 1px dashed var(--line); border-radius: 4px; background: var(--panel); color: var(--muted); font-size: 12px; }
 .rd-more:hover { color: var(--fg); border-color: var(--accent); }
 .rd .lc, .rd .composer { margin: 6px 0 10px; }
@@ -242,6 +264,19 @@ body.zoomed { overflow: hidden; }
 .dl.add { background: var(--add-bg); } .dl.add .g { background: var(--add-gutter); }
 .dl.del { background: var(--del-bg); } .dl.del .g { background: var(--del-gutter); }
 .dl.has { box-shadow: inset 3px 0 0 var(--warn); }
+.dl { position: relative; }
+.dl.foreign { background: none; }
+.dl.foreign .g { background: var(--panel); }
+.dl.foreign .code { padding-right: 5em; opacity: .5; }
+.dl.shared .code { padding-right: 6.5em; }
+.dl.mine .code { box-shadow: inset 3px 0 0 var(--accent); }
+.dl.add.shared { background: color-mix(in srgb, var(--add-bg) 45%, var(--bg)); }
+.dl.add.shared .g { background: color-mix(in srgb, var(--add-gutter) 45%, var(--panel)); }
+.dl.del.shared { background: color-mix(in srgb, var(--del-bg) 45%, var(--bg)); }
+.dl.del.shared .g { background: color-mix(in srgb, var(--del-gutter) 45%, var(--panel)); }
+.whose.also { color: var(--accent); border-color: var(--accent); }
+.ph { background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: inset 0 -2px 0 var(--accent); border-radius: 2px; }
+.ph-other { opacity: .4; }
 .dl .sign { color: var(--muted); }
 .hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-template-tag, .hljs-meta { color: var(--tk-kw); }
 .hljs-string, .hljs-regexp, .hljs-template-variable, .hljs-addition { color: var(--tk-str); }
