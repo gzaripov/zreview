@@ -918,28 +918,10 @@
   // ---- reading order: what a reviewer should meet first. The domain types a feature declares come
   // first (they name everything downstream), then what stores them, then the logic, the edges it is
   // reached through, the surface, and last the tests and generated files that only confirm the rest.
-  const ORDER = [
-    ['domain', 'Domain types'], ['data', 'Persistence'], ['logic', 'Logic'],
-    ['edge', 'Interfaces'], ['ui', 'Surface'], ['test', 'Tests'], ['docs', 'Docs'], ['config', 'Config and generated'],
-  ];
-  const entityFiles = (f) => new Set((f.entities || []).map(e => e.file).filter(Boolean));
-  function groupOf(f, path) {
-    if (entityFiles(f).has(path)) return 'domain';
-    if (/(^|[\/._-])(tests?|specs?|__tests__|__mocks__|fixtures?|snapshots?)([\/._-]|$)/i.test(path)) return 'test';
-    if (/\.(md|mdx|markdown|rst|adoc)$/i.test(path)) return 'docs';
-    if (/(^|\/)(package-lock|bun\.lock|yarn\.lock|pnpm-lock|go\.sum|cargo\.lock)|\.(lock|ya?ml|toml|ini|cfg|env|json|jsonc)$|(^|\/)(dockerfile|makefile)|(^|\/)(gen|generated|__generated__)\//i.test(path)) return 'config';
-    if (/\.(proto|graphql|gql)$/i.test(path)) return 'edge';
-    if (/\.(png|jpe?g|gif|webp|ico|avif|woff2?|ttf|otf)$/i.test(path)) return 'ui';
-    if (/(^|[\/._-])(entit|model|schema|domain|dto|types?)([\/._-]|$)/i.test(path)) return 'domain';
-    if (/(^|[\/._-])(repositor|store|dao|database|db|migrations?|quer|sql|prisma|persist)/i.test(path)) return 'data';
-    if (/(^|[\/._-])(route|router|api|endpoint|controller|cli|command|serve|server|middleware)/i.test(path)) return 'edge';
-    if (/\.(css|scss|sass|less|html|svg|vue|svelte)$|(^|[\/._-])(component|view|page|screen|style|ui)/i.test(path)) return 'ui';
-    return 'logic';
-  }
   /** The feature's files, grouped and flattened into the order the rail and the arrows follow. */
   function reading(f) {
     const files = f.files || [];
-    const groups = ORDER.map(([key, label]) => ({ key, label, files: files.filter(x => groupOf(f, x.path) === key) })).filter(g => g.files.length);
+    const groups = (data.groups || []).map(([key, label]) => ({ key, label, files: files.filter(x => (x.group || 'other') === key) })).filter(g => g.files.length);
     return { groups, flat: groups.flatMap(g => g.files) };
   }
 

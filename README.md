@@ -24,8 +24,17 @@ curl -fsSL https://raw.githubusercontent.com/gzaripov/zreview/main/install.sh | 
 
 That clones to `~/code/zreview`, installs Mermaid with `bun install`, puts
 `zreview` and `zplan` on PATH with `bun link`, and installs the agent skill
-where both Claude Code and omp load it. Re-run it to update. From a checkout,
-`./install.sh` does the same.
+where both Claude Code and omp load it. From a checkout, `./install.sh` does
+the same.
+
+`zreview update` re-runs it for the checkout `zreview` runs from: it pulls,
+installs and relinks. Merging a change on GitHub does not reach an install
+until then, so `review` and `plan` check once a day whether the checkout is
+behind its upstream and say so on stderr (`ZREVIEW_NO_UPDATE_CHECK=1` turns
+that off). `zreview --version` prints the commit an install runs, the
+sidebar shows the build that made the page, and the URL line on stderr
+carries it too, so a page that still shows an old bug says which build drew
+it.
 
 Manually:
 
@@ -113,8 +122,9 @@ and the page degrades to file links.
   full screen, starting at the first you have not viewed. The rail on the
   left groups the feature's files in the order worth reading them: the domain
   types the feature declares, then what stores them, the logic, the
-  interfaces it is reached through, the surface, and last the tests and
-  generated files. `→` `PgDn` and `←` `PgUp` move, `Enter` marks the file
+  interfaces it is reached through, the surface, then the tests, the docs,
+  config and generated files, and last any file zreview could not place.
+  `→` `PgDn` and `←` `PgUp` move, `Enter` marks the file
   viewed and goes on, `C` comments on the whole file, `Esc` returns, `R`
   switches a Markdown file between rendered and source. A horizontal swipe
   works on a touchscreen. Clicking a diff line still comments on that line.
@@ -303,6 +313,12 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
   feature. The error prints every file it rejects with its changed lines
   numbered the way `lines` takes them, each tagged with the feature it goes
   to now, so list the files first and claim from what it prints.
+- zreview groups each feature's files by what kind of file each is, then,
+  for code, by what its path says it does: `domain`, `persistence`, `logic`,
+  `interfaces`, `surface`, `tests`, `docs`, `config` (with generated files
+  and lockfiles), and `other` for a file it does not recognize. Markdown is
+  always docs, and a file an entity names is always a domain type. When it
+  guesses wrong, `"role": "docs"` on the file's object sets the group.
 
 ## Screenshots
 
@@ -321,8 +337,14 @@ src/cli.ts        the contract: flags, stdout, exit codes
 src/serve.ts      localhost server; resolves on Submit or tab close
 src/build.ts      review.json → HTML; diff parsing; screenshot inlining
 src/diagrams.ts   parses each diagram with the Mermaid the page renders it with
+src/groups.ts     which reading-order group a file goes in
+src/update.ts     the build an install runs, and whether it is behind
 src/page/         index.html, style.css, app.js — inlined into one file at build
 skill/SKILL.md    the agent skill; install.sh links it into ~/.claude/skills
 ```
+
+`bun test` runs the tests: the file grouping against a table of real paths,
+and the rules for which feature a changed line belongs to. A file that lands
+in the wrong group is a new row in `src/groups.test.ts`.
 
 Bun, plus one dependency: Mermaid, to check the diagrams. MIT.

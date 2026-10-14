@@ -12,13 +12,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { diagramError, mermaidVersion } from "./diagrams.ts";
+import { GROUP_KEYS, GROUPS, groupOf, isGroup } from "./groups.ts";
 
 export type Shots = { before?: string; after?: string; caption?: string; before_src?: string; after_src?: string };
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
 export type Hunk = { header: string; lines: DiffLine[] };
 export type FileDiff = { path: string; hunks: Hunk[]; add: number; del: number; status?: string };
 export type FileRef = {
-  path: string; url: string; lines?: (string | number)[]; phrases?: string[]; own?: { new: number[]; old: number[] };
+  path: string; url: string; lines?: (string | number)[]; phrases?: string[]; role?: string; group?: string;
+  own?: { new: number[]; old: number[] };
   hunks?: Hunk[]; add?: number; del?: number; status?: string; text?: { before: string; after: string };
 };
 /** A field is what an entity consists of; an operation is what you can do with it. Both carry the reasoning, not just the type. */
@@ -51,9 +53,10 @@ export type Review = {
   plan?: boolean;
   pr: { repo: string; number?: number; url?: string; title: string; base?: string; head?: string; exposure?: string };
   features: Feature[];
+  groups?: typeof GROUPS;
 };
 export type BuildOptions = {
-  maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean;
+  maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean; build?: string;
   headText?: (path: string) => Promise<string | undefined>;
 };
 
@@ -338,6 +341,8 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
     for (const [i, file] of (f.files ?? []).entries()) {
       if (typeof file !== "string" && typeof file?.path !== "string") {
         problems.push(`feature ${f.id} file ${i + 1}: a path, or { "path": …, "lines": [ … ] }`);
+      } else if (typeof file !== "string" && file.role !== undefined && !isGroup(file.role)) {
+        problems.push(`feature ${f.id}, ${file.path}: role ${JSON.stringify(file.role)} is not one of ${GROUP_KEYS.join(", ")}`);
       }
     }
     for (const e of f.entities ?? []) {
@@ -376,7 +381,9 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   const claimed = new Set<string>();
   for (const f of review.features ?? []) {
     f.files = (f.files ?? []).map((p) => (typeof p === "string" ? fileLink(review.pr, p) : { ...fileLink(review.pr, p.path), ...p }));
+    const entityFiles = new Set((f.entities ?? []).map((e) => e.file).filter((p): p is string => !!p));
     for (const ref of f.files as FileRef[]) {
+      ref.group = ref.role ?? groupOf(ref.path, entityFiles);
       claimed.add(ref.path);
       const d = diffs?.get(ref.path);
       if (d) Object.assign(ref, { hunks: d.hunks, add: d.add, del: d.del, status: d.status });
@@ -413,6 +420,7 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
     ref.text = await texts.get(ref.path);
     if (!ref.text) log.push(`${ref.path}: no whole file to render at ${review.pr.head}, so the page shows its source diff`);
   })));
+  review.groups = GROUPS;
   const payload = inlineJson(review);
   const page = join(import.meta.dir, "page");
   const [index, style, app] = await Promise.all(
@@ -425,8 +433,8 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   const title = review.plan ? `Plan: ${review.pr.repo} — ${review.pr.title}` : `Review: ${review.pr.repo}#${review.pr.number}`;
   const values: Record<string, string> = {
     TITLE: escapeHtml(title), MERMAID: mermaidVersion, STYLE: style, SERVED: String(opts.served),
-    STATE: stateSlot, REVIEW_JSON: payload, APP: app,
+    STATE: stateSlot, REVIEW_JSON: payload, APP: app, BUILD: escapeHtml(opts.build ?? ""),
   };
-  const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP)__/g, (_, key: string) => values[key]!);
+  const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP|BUILD)__/g, (_, key: string) => values[key]!);
   return { html, review, log, stateSlot };
 }

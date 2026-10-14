@@ -51,6 +51,7 @@ nav .v.all { color: var(--ok); }
 .tally button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .tally button:disabled { opacity: .5; cursor: default; }
 .tally .done { margin-top: 10px; padding: 10px; border-radius: 6px; background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+.tally .build { margin-top: 14px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
 
 main { padding: 28px 40px 80px; max-width: 1500px; }
 .scenario, .prose, .esum { max-width: 860px; }
