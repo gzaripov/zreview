@@ -173,6 +173,9 @@ mkdir -p /tmp/zreview-<N> && cd /tmp/zreview-<N>
 zreview review review.json --json --result-file decision.json
 ```
 
+If zreview says the install is behind its upstream, run `zreview update`
+first, so the reviewer gets the current page.
+
 `zreview review` fetches the PR's diff through `gh pr diff` (or takes
 `--diff <file>`), opens the page, and **blocks**. Run it with a long or no
 timeout, or in the background, and read stdout when it returns. Only Submit

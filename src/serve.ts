@@ -20,6 +20,7 @@ export type ServeOptions = {
   port: number; open: boolean; timeoutSeconds?: number; persist: boolean; initialState?: ReviewState | null;
   /** The marker buildHtml left where the page's state goes. */
   stateSlot: string;
+  build?: string;
 };
 
 /** All features approved -> approved. Any changes requested -> changes. Otherwise something was left open. */
@@ -79,7 +80,7 @@ export function serve(html: string, review: Review, opts: ServeOptions): Promise
     },
   });
   const url = `http://127.0.0.1:${server.port}/`;
-  console.error(`zreview: ${url}${opts.timeoutSeconds ? ` (waiting for Submit, up to ${hms(opts.timeoutSeconds)})` : " (waiting for Submit, no timeout)"}`);
+  console.error(`zreview${opts.build ? ` ${opts.build}` : ""}: ${url}${opts.timeoutSeconds ? ` (waiting for Submit, up to ${hms(opts.timeoutSeconds)})` : " (waiting for Submit, no timeout)"}`);
 
   if (opts.open) {
     const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";

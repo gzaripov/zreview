@@ -56,7 +56,7 @@ export type Review = {
   groups?: typeof GROUPS;
 };
 export type BuildOptions = {
-  maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean;
+  maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean; build?: string;
   headText?: (path: string) => Promise<string | undefined>;
 };
 
@@ -433,8 +433,8 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
   const title = review.plan ? `Plan: ${review.pr.repo} — ${review.pr.title}` : `Review: ${review.pr.repo}#${review.pr.number}`;
   const values: Record<string, string> = {
     TITLE: escapeHtml(title), MERMAID: mermaidVersion, STYLE: style, SERVED: String(opts.served),
-    STATE: stateSlot, REVIEW_JSON: payload, APP: app,
+    STATE: stateSlot, REVIEW_JSON: payload, APP: app, BUILD: escapeHtml(opts.build ?? ""),
   };
-  const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP)__/g, (_, key: string) => values[key]!);
+  const html = index.replace(/__(TITLE|MERMAID|STYLE|SERVED|STATE|REVIEW_JSON|APP|BUILD)__/g, (_, key: string) => values[key]!);
   return { html, review, log, stateSlot };
 }

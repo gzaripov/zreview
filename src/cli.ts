@@ -16,11 +16,12 @@
 
 import { parseArgs } from "node:util";
 import { link, stat, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { $ } from "bun";
 import { buildHtml, loadReview, ReviewError } from "./build.ts";
 import { serve, type Outcome } from "./serve.ts";
 import { loadState, statePath } from "./state.ts";
+import { behind, buildId, home } from "./update.ts";
 
 const USAGE = `zreview — review a pull request one feature at a time
 
@@ -28,6 +29,8 @@ const USAGE = `zreview — review a pull request one feature at a time
   zreview review <review.json> [--json] [--require-approval] [--result-file <path>]
                                [--no-open] [--port <n>] [--timeout <seconds>] [--fresh]
   zreview build  <review.json> [-o <review.html>]
+  zreview update                pull the latest zreview and reinstall it
+  zreview --version
 
   both: [--max-width <px>] [--quality <n>] [--no-reencode]
 
@@ -41,6 +44,9 @@ review  serves the page, opens it, blocks until Submit, prints the decision
         decisions, comments and viewed files persist per PR under ~/.local/state/zreview;
         --fresh starts over
 build   writes a self-contained review.html and exits
+update  re-runs install.sh: pulls this checkout, installs, relinks the CLI and the skill.
+        review and plan say once a day when this install is behind its upstream;
+        ZREVIEW_NO_UPDATE_CHECK=1 turns that off
 
 stdout  the Markdown summary; one JSON record with --json; nothing when dismissed
 exit    0 always, unless --require-approval: 0 approved, 1 otherwise. 2 = could not run`;
@@ -93,6 +99,11 @@ async function headText(repo: string, head: string, path: string): Promise<strin
 }
 const argv = process.argv.slice(2);   // process.argv, not Bun.argv: the zplan shim prepends its command
 if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") { console.log(USAGE); process.exit(0); }
+if (argv[0] === "--version" || argv[0] === "-v") { console.log(`zreview ${await buildId()}`); process.exit(0); }
+if (argv[0] === "update") {
+  const run = Bun.spawnSync(["bash", join(home, "install.sh")], { env: { ...process.env, ZREVIEW_SRC: home }, stdout: "inherit", stderr: "inherit" });
+  process.exit(run.exitCode ?? 1);
+}
 
 const command = ["review", "build", "plan"].includes(argv[0]) ? argv.shift()! : "review";
 const parsed = (() => { try { return parseArgs({
@@ -125,7 +136,12 @@ try {
   if (loaded.plan) console.error("zreview: plan review — no code yet, so no diff. Run `zreview review` with the files once it is built.");
   const state = opt.fresh ? null : await loadState(loaded);
   if (state) console.error(`zreview: resuming from ${statePath(loaded)} (--fresh to start over)`);
+  const build = await buildId();
+  if (command !== "build") {
+    behind().then((b) => b && console.error(`zreview: this install is ${b.count} commit${b.count === 1 ? "" : "s"} behind ${b.upstream}; run \`zreview update\` to get ${b.count === 1 ? "it" : "them"}`)).catch(() => {});
+  }
   const built = await buildHtml(src, {
+    build,
     maxWidth: opt["no-reencode"] ? 0 : Number(opt["max-width"]),
     quality: Number(opt.quality),
     served: command !== "build",
@@ -150,6 +166,7 @@ try {
     persist: true,
     initialState: state,
     stateSlot: built.stateSlot,
+    build,
   });
 
   if (opt.json) console.log(JSON.stringify(outcome));
