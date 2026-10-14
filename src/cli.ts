@@ -95,7 +95,7 @@ const argv = process.argv.slice(2);   // process.argv, not Bun.argv: the zplan s
 if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") { console.log(USAGE); process.exit(0); }
 
 const command = ["review", "build", "plan"].includes(argv[0]) ? argv.shift()! : "review";
-const { values: opt, positionals } = parseArgs({
+const parsed = (() => { try { return parseArgs({
   args: argv,
   options: {
     out: { type: "string", short: "o", default: "review.html" },
@@ -110,9 +110,12 @@ const { values: opt, positionals } = parseArgs({
     "no-reencode": { type: "boolean", default: false },
     diff: { type: "string" },
     fresh: { type: "boolean", default: false },
+    help: { type: "boolean", short: "h", default: false },
   },
   allowPositionals: true,
-});
+}); } catch (e) { die(`${(e as Error).message}\n\n${USAGE}`); } })();
+const { values: opt, positionals } = parsed;
+if (opt.help) { console.log(USAGE); process.exit(0); }
 const src = positionals[0] ?? die(USAGE);
 if (opt["result-file"]) await checkResultPath(opt["result-file"]);
 
