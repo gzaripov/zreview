@@ -7,9 +7,10 @@
 // reviewer who closes the tab loses nothing and can re-run to pick it up.
 
 import { inlineJson, type Review } from "./build.ts";
-import { saveState, type ReviewState } from "./state.ts";
+import { decisionUnits } from "./levels.ts";
+import { saveState, type ClauseState, type ReviewState } from "./state.ts";
 
-export type FeatureDecision = { decision: "approved" | "changes"; note?: string; at?: number };
+export type FeatureDecision = { decision?: "approved" | "changes"; note?: string; at?: number; rows?: Record<string, ClauseState> };
 export type Outcome = {
   decision: "approved" | "changes" | "incomplete" | "dismissed";
   features: Record<string, FeatureDecision>;
@@ -25,11 +26,15 @@ export type ServeOptions = {
 
 /** All features approved -> approved. Any changes requested -> changes. Otherwise something was left open. */
 export function classify(review: Review, features: Record<string, FeatureDecision>): Outcome["decision"] {
-  const ids = review.features.map((f) => f.id);
-  if (ids.some((id) => features[id]?.decision === "changes")) return "changes";
+  const ids = decisionUnits(review);
+  const all = [...ids, ...review.features.map((f) => f.id)];
+  if (all.some((id) => features[id]?.decision === "changes")) return "changes";
   if (ids.length && ids.every((id) => features[id]?.decision === "approved")) return "approved";
   return "incomplete";
 }
+
+export const decided = (state: ReviewState): Record<string, FeatureDecision> =>
+  Object.fromEntries(Object.entries(state).filter(([, f]) => f.decision || Object.values(f.rows ?? {}).some((r) => r.d)));
 
 const hms = (s: number) => s >= 3600 ? `${+(s / 3600).toFixed(1)}h` : s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
 
@@ -49,7 +54,7 @@ export function serve(html: string, review: Review, opts: ServeOptions): Promise
   const page = () => halves[0] + inlineJson(latest) + halves[1];
   const dismissed = () => ({
     decision: "dismissed" as const,
-    features: Object.fromEntries(Object.entries(latest).filter(([, f]) => f.decision)) as Record<string, FeatureDecision>,
+    features: decided(latest),
     summary: "",
     url,
   });

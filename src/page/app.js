@@ -1,22 +1,70 @@
 (() => {
   const data = JSON.parse(document.getElementById('review-data').textContent);
   marked.setOptions({ mangle: false, headerIds: false });
+  const LAYERED = 'purpose' in data;
+  const ABSENT = LAYERED && !!data.purpose.absent;
+  const LEVELS = !LAYERED ? [] : [
+    { id: '@high', key: 'H', name: 'High', title: 'Why this exists', ask: 'Is this the right thing to build, and are its limits right?' },
+    { id: '@mid', key: 'M', name: 'Mid', title: 'What the product does', ask: 'Is this how the product should work? Is anything missing, or here though nobody asked for it?' },
+    { id: '@low', key: 'L', name: 'Low', title: 'How it behaves and is built', ask: 'Would a tester sign this off? Is every rule checked, and does every case check a rule?' },
+  ].filter(l => !(ABSENT && l.id === '@high'));
+  const CODE = '@code';
 
-  let monacoApi = null; const editors = [];   // Monaco, once its CDN load resolves; see below
+  let monacoApi = null; const editors = new Map();   // Monaco, once its CDN load resolves; see below
 
   // ---- theme: data-theme on <html> is set before paint by a head script; here the toggle, and mermaid follows it
   const root = document.documentElement, themeBtn = document.getElementById('theme');
+  const DIAGRAM_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+  const DIAGRAM_COLORS = {
+    light: {
+      background: '#ffffff', primaryColor: '#ffffff', primaryTextColor: '#1f2328', primaryBorderColor: '#656d76', lineColor: '#656d76', textColor: '#1f2328',
+      secondaryColor: '#f6f8fa', secondaryBorderColor: '#d0d7de', secondaryTextColor: '#1f2328', tertiaryColor: '#f6f8fa', tertiaryBorderColor: '#d0d7de', tertiaryTextColor: '#1f2328',
+      mainBkg: '#ffffff', nodeBorder: '#656d76', clusterBkg: '#f6f8fa', clusterBorder: '#d0d7de', titleColor: '#1f2328', edgeLabelBackground: '#ffffff',
+      noteBkgColor: '#fff1a8', noteTextColor: '#1f2328', noteBorderColor: '#d4a72c',
+      actorBkg: '#ffffff', actorBorder: '#656d76', actorTextColor: '#1f2328', actorLineColor: '#8c959f', signalColor: '#1f2328', signalTextColor: '#1f2328',
+      labelBoxBkgColor: '#f6f8fa', labelBoxBorderColor: '#d0d7de', labelTextColor: '#1f2328', loopTextColor: '#1f2328',
+      activationBkgColor: '#f6f8fa', activationBorderColor: '#656d76', sequenceNumberColor: '#ffffff',
+    },
+    dark: {
+      darkMode: true, background: '#0d1117', primaryColor: '#0d1117', primaryTextColor: '#e6edf3', primaryBorderColor: '#8b949e', lineColor: '#8b949e', textColor: '#e6edf3',
+      secondaryColor: '#161b22', secondaryBorderColor: '#30363d', secondaryTextColor: '#e6edf3', tertiaryColor: '#161b22', tertiaryBorderColor: '#30363d', tertiaryTextColor: '#e6edf3',
+      mainBkg: '#0d1117', nodeBorder: '#8b949e', clusterBkg: '#161b22', clusterBorder: '#30363d', titleColor: '#e6edf3', edgeLabelBackground: '#0d1117',
+      noteBkgColor: '#4a3d07', noteTextColor: '#e6edf3', noteBorderColor: '#d29922',
+      actorBkg: '#0d1117', actorBorder: '#8b949e', actorTextColor: '#e6edf3', actorLineColor: '#6e7681', signalColor: '#e6edf3', signalTextColor: '#e6edf3',
+      labelBoxBkgColor: '#161b22', labelBoxBorderColor: '#30363d', labelTextColor: '#e6edf3', loopTextColor: '#e6edf3',
+      activationBkgColor: '#161b22', activationBorderColor: '#8b949e', sequenceNumberColor: '#0d1117',
+    },
+  };
+  const glyph = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+  const MOON = glyph('<path d="M13.4 9.7A5.7 5.7 0 0 1 6.3 2.6a5.7 5.7 0 1 0 7.1 7.1z"/>');
+  const SUN = glyph('<circle cx="8" cy="8" r="2.9"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>');
+  let themeTurn = 0;
   const applyTheme = (t, persist) => {
     root.dataset.theme = t;
+    themeTurn++;
     if (persist) localStorage.setItem('zreview:theme', t);
-    themeBtn.textContent = t === 'dark' ? '☀' : '☾';
+    themeBtn.innerHTML = t === 'dark' ? SUN : MOON;
     themeBtn.title = t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
-    mermaid.initialize({ startOnLoad: false, theme: t === 'dark' ? 'dark' : 'default', securityLevel: 'strict' });
+    themeBtn.setAttribute('aria-label', themeBtn.title);
+    mermaid.initialize({ startOnLoad: false, theme: 'base', themeVariables: { fontFamily: DIAGRAM_FONT, fontSize: '14px', ...DIAGRAM_COLORS[t === 'dark' ? 'dark' : 'light'] }, securityLevel: 'strict' });
     if (monacoApi) monacoApi.editor.setTheme(t === 'dark' ? 'zreview-dark' : 'zreview-light');
   };
   applyTheme(root.dataset.theme, false);
   themeBtn.onclick = () => { applyTheme(root.dataset.theme === 'dark' ? 'light' : 'dark', true); render(); };
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!localStorage.getItem('zreview:theme')) { applyTheme(e.matches ? 'dark' : 'light', false); render(); } });
+  const faceBtn = document.getElementById('face');
+  const applyFace = (face, persist) => {
+    root.dataset.face = face;
+    if (persist) localStorage.setItem('zreview:face', face);
+    faceBtn.title = face === 'sans' ? 'Statements are set in the system sans. Switch to Charter (F)' : 'Statements are set in Charter. Switch to the system sans (F)';
+  };
+  const toggleFace = () => {
+    const row = [...document.querySelectorAll('.d4-cl, .d4-s > h2, .file')].find(el => el.getBoundingClientRect().bottom > 12), top = row?.getBoundingClientRect().top;
+    applyFace(root.dataset.face === 'sans' ? 'serif' : 'sans', true);
+    if (row) scrollBy(0, row.getBoundingClientRect().top - top);
+  };
+  applyFace(localStorage.getItem('zreview:face') === 'sans' ? 'sans' : 'serif', false);
+  faceBtn.onclick = toggleFace;
 
   // ---- state: { [featureId]: { decision, note, at, head, files: {path: hash}, viewed: {path: hash}, comments: [{ id, kind, file, side, line, section, quote, body, at }] } }
   // Served: the server hands the saved state in and takes every change back (the port changes per run, so
@@ -30,42 +78,126 @@
   };
   let state = SERVED ? (INITIAL_STATE || {}) : load();
   let submitted = false;
+  const delBtn = (c) => submitted ? '' : `<button type="button" data-del="${c.id}">delete</button>`;
   let showDiff = true;                         // reworked prose shows what it said beside what it says
-  let current = location.hash.slice(1) || (data.features[0] && data.features[0].id);
+  let current = location.hash.slice(1) || (LAYERED ? LEVELS[0].id : data.features[0] && data.features[0].id);
+  let shownId = null;
   const expanded = {};                         // featureId -> Map of file path -> open, where the reviewer toggled it
   const entry = (id) => (state[id] ||= { comments: [] }, state[id].comments ||= [], state[id]);
   const uid = () => Math.random().toString(36).slice(2, 10);
 
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const md = (s) => s ? marked.parse(s) : '';
+  const inl = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
   const main = document.getElementById('main');
+  const drawn = new Map(), drawing = new Set();
+  let drawCount = 0;
+  const drawKey = (source) => `${root.dataset.theme}\n${source}`;
+  const figureBody = (hit) => !hit ? '' : hit.svg
+    ? `<button class="fs" type="button" title="Full screen" aria-label="Show the diagram full screen">⛶</button>${hit.svg}`
+    : `<p class="none">Diagram failed to render: ${esc(hit.error)}</p>`;
+  const figure = (d) => {
+    const hit = drawn.get(drawKey(d.mermaid));
+    return `<figure class="fig"><div class="diagram${hit ? '' : ' pending'}" data-source="${esc(d.mermaid)}">${figureBody(hit)}</div>${d.title ? `<figcaption>${esc(d.title)}</figcaption>` : ''}</figure>`;
+  };
+  function draw(source) {
+    const key = drawKey(source);
+    if (drawn.has(key) || drawing.has(key)) return;
+    const id = `mmd-${++drawCount}`, turn = themeTurn;
+    drawing.add(key);
+    mermaid.render(id, source).then(r => ({ svg: r.svg }), e => { document.getElementById(`d${id}`)?.remove(); return { error: e.message }; }).then(hit => {
+      drawing.delete(key);
+      if (turn !== themeTurn) return drawFigures();
+      drawn.set(key, hit);
+      const held = [...main.querySelectorAll('.d4-cl.cur, .d4-s > h2, .file')].find(el => el.getBoundingClientRect().bottom > 0), top = held?.getBoundingClientRect().top;
+      for (const box of main.querySelectorAll('.diagram.pending')) {
+        if (drawKey(box.dataset.source) !== key) continue;
+        box.classList.remove('pending'); box.innerHTML = figureBody(hit);
+      }
+      if (held?.isConnected) scrollBy(0, held.getBoundingClientRect().top - top);
+    });
+  }
+  function drawFigures() { main.querySelectorAll('.diagram.pending').forEach(box => draw(box.dataset.source)); }
+  const drawAhead = () => (window.requestIdleCallback || setTimeout)(() => data.features.forEach(f => (f.diagrams || []).forEach(d => draw(d.mermaid))));
+  const items = new Map();
+  if (LAYERED) {
+    for (const g of data.purpose.goals || []) items.set(g.id, { level: '@high', kind: 'goal', text: g.text });
+    for (const g of data.purpose.nonGoals || []) items.set(g.id, { level: '@high', kind: 'non-goal', text: g.text });
+    for (const f of data.features) {
+      items.set(f.id, { level: '@mid', kind: 'feature', text: f.title });
+      for (const r of f.rules || []) items.set(r.id, { level: '@mid', kind: 'rule', text: r.text });
+      for (const b of f.behaviours || []) items.set(b.id, { level: '@low', kind: 'behaviour', text: b.title });
+    }
+  }
 
   document.getElementById('pr-title').textContent = data.pr.title;
   const PLAN = !!data.plan;
+  const codeName = PLAN ? 'Plan' : 'Code';
+  const HEAD_AND_BASE = [data.pr.head && `at ${data.pr.head}`, data.pr.base && `into ${data.pr.base}`].filter(Boolean).join(', ');
   document.getElementById('pr-meta').innerHTML = PLAN
-    ? `<span class="planchip">Plan</span> ${esc(data.pr.repo)} · not built yet`
-    : `<a href="${esc(data.pr.url)}">${esc(data.pr.repo)}#${data.pr.number}</a> · <code>${esc(data.pr.head)}</code> → ${esc(data.pr.base)}`;
-  document.getElementById('pr-exposure').textContent = data.pr.exposure || '';
+    ? `Plan for ${esc(data.pr.repo)}, not built yet`
+    : `<a href="${esc(data.pr.url)}" title="${esc(HEAD_AND_BASE)}">${esc(data.pr.repo)}#${data.pr.number}</a>`;
+  const reach = document.getElementById('pr-exposure'), more = document.getElementById('pr-more');
+  reach.innerHTML = LAYERED && !ABSENT ? '' : inl(data.pr.exposure || '');
+  const fitReach = () => { more.hidden = !reach.classList.contains('open') && reach.scrollHeight <= reach.clientHeight + 1; };
+  more.onclick = () => { more.textContent = reach.classList.toggle('open') ? 'Show less' : 'Show all'; };
+  addEventListener('resize', fitReach);
+  fitReach();
   if (SERVED) document.getElementById('submit').hidden = false;
   if (PLAN) document.getElementById('submit').textContent = 'Submit plan review';
 
   // ---- sidebar
+  const decisionBadge = (s, moved) => moved ? 'updated' : s.decision === 'approved' ? 'approved' : s.decision === 'changes' ? 'changes' : 'open';
+  const badgeLabel = (b) => b === 'changes' ? 'changes requested' : b;
+  const navBox = (b) => `<span class="nb ${{ approved: 'ok', changes: 'change', updated: 'moved' }[b] || ''}">${{ approved: '✓', changes: '✕', updated: '!' }[b] || ''}</span>`;
+  const navWord = (b, title) => b === 'open' ? '' : `<span class="badge ${b}"${title ? ` title="${esc(title)}"` : ''}>${badgeLabel(b)}</span>`;
+  const side = document.querySelector('.side');
+  const navOpen = (nav) => {
+    nav.querySelectorAll('button').forEach(b => b.onclick = () => { current = b.dataset.id; location.hash = current; render(); });
+    const on = nav.querySelector('button.active');
+    if (!on || side.scrollHeight <= side.clientHeight) return;
+    const a = on.getBoundingClientRect(), b = side.getBoundingClientRect();
+    if (a.top < b.top) side.scrollTop -= b.top - a.top + 8;
+    else if (a.bottom > b.bottom) side.scrollTop += a.bottom - b.bottom + 8;
+  };
+  function navCode(f, i) {
+    const s = state[f.id] || {}, n = (s.comments || []).length, v = viewedCount(f), upd = changedSince(f).length;
+    const b = decisionBadge(s, upd);
+    return `<button data-id="${esc(f.id)}" class="code ${f.id === current ? 'active' : ''}">
+      ${navBox(b)}<span class="body"><span class="t"><span class="id">${i + 1}</span>${esc(f.title)}</span>
+      <span class="meta">${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}${n ? `<span class="c">${plural(n, 'comment')}</span>` : ''}${navWord(b, upd ? `${plural(upd, 'file')} changed since your decision` : '')}</span></span></button>`;
+  }
+  function navAll() {
+    const fs = data.features, st = fs.map(f => state[f.id] || {}), counts = fs.map(viewedCount);
+    const total = counts.reduce((n, v) => n + v.total, 0), seen = counts.reduce((n, v) => n + v.seen, 0);
+    const n = st.reduce((sum, s) => sum + (s.comments || []).length, 0), done = st.filter(s => s.decision).length;
+    const moved = fs.filter(f => state[f.id]?.decision && changedSince(f).length).length;
+    const b = moved ? 'updated' : st.some(s => s.decision === 'changes') ? 'changes' : st.every(s => s.decision === 'approved') ? 'approved' : 'open';
+    return `<button data-id="${CODE}" class="lv ${current === CODE ? 'active' : ''}">
+      ${navBox(b)}<span class="body"><span class="t">${codeName}</span>
+      <span class="meta"><span class="cnt">${total ? `${seen} of ${total} viewed` : `${done} of ${fs.length} decided`}</span>${n ? `<span class="c">${plural(n, 'comment')}</span>` : ''}${navWord(b, moved ? `${plural(moved, 'feature')} changed since your decision` : '')}</span></span></button>`;
+  }
+  function renderLevelNav(nav) {
+    const levels = LEVELS.map(l => {
+      const s = state[l.id] || {}, b = decisionBadge(s, levelMoved(l.id)), n = (s.comments || []).length, t = tallyOf(l.id);
+      return `<button data-id="${l.id}" class="lv ${l.id === current ? 'active' : ''}" title="${esc(l.title)}">
+        ${navBox(b)}<span class="body"><span class="t">${l.name}</span>
+        <span class="meta"><span class="cnt">${t.n - t.open} of ${t.n} read</span>${n ? `<span class="c">${plural(n, 'comment')}</span>` : ''}${navWord(b)}</span></span></button>`;
+    }).join('');
+    nav.innerHTML = `${ABSENT ? `<div class="navnote"><b>High</b>: none. ${esc(data.purpose.absent)}</div>` : ''}${levels}${data.features.length ? navAll() : ''}`;
+    navOpen(nav);
+    const a = LEVELS.filter(l => state[l.id]?.decision === 'approved').length, c = LEVELS.filter(l => state[l.id]?.decision === 'changes').length;
+    const below = data.features.some(f => state[f.id]?.decision === 'changes');
+    document.getElementById('tally').textContent = `${a} of ${LEVELS.length} levels approved${c ? `, ${c} with changes requested` : ''}${below ? `, changes requested in the ${codeName.toLowerCase()}` : ''}`;
+  }
   function renderNav() {
     const nav = document.getElementById('nav');
-    nav.innerHTML = data.features.map((f, i) => {
-      const s = state[f.id] || {};
-      const upd = changedSince(f).length;
-      const badge = upd ? 'updated' : s.decision === 'approved' ? 'approved' : s.decision === 'changes' ? 'changes' : 'open';
-      const label = badge === 'changes' ? 'changes requested' : badge;
-      const n = (s.comments || []).length, v = viewedCount(f);
-      return `<button data-id="${esc(f.id)}" class="${f.id === current ? 'active' : ''}">
-        <span class="n">${i + 1}</span><span class="body"><span class="t">${esc(f.title)}</span>
-        <span class="meta">${n ? `<span class="c">${n} ✎</span>` : ''}${v.total ? `<span class="v ${v.seen === v.total ? 'all' : ''}" title="files viewed">${v.seen}/${v.total} 👁</span>` : ''}<span class="badge ${badge}" title="${upd ? `${upd} file${upd === 1 ? '' : 's'} changed since your decision` : ''}">${label}</span></span></span></button>`;
-    }).join('');
-    nav.querySelectorAll('button').forEach(b => b.onclick = () => { current = b.dataset.id; location.hash = current; render(); });
+    if (LAYERED) return renderLevelNav(nav);
+    nav.innerHTML = data.features.map(navCode).join('');
+    navOpen(nav);
     const total = data.features.length, a = data.features.filter(f => state[f.id]?.decision === 'approved').length,
           c = data.features.filter(f => state[f.id]?.decision === 'changes').length;
-    document.getElementById('tally').textContent = `${a} approved · ${c} changes requested · ${total - a - c} open`;
+    document.getElementById('tally').textContent = `${a} of ${total} approved${c ? `, ${c} with changes requested` : ''}`;
   }
 
   // ---- revisions: what the reviewer had in front of them last time. Taken when they decide on a
@@ -113,9 +245,10 @@
   const ownerRefs = (list) => [...list].sort((a, b) => a - b).map(i => i + 1).join(', ');
   const ownerTag = (list, also = false) => `<span class="whose${also ? ' also' : ''}" title="${esc(`${also ? 'Also claimed by' : 'Belongs to'} ${ownerNames(list)}`)}">${also ? 'also ' : ''}${[...list].sort((a, b) => a - b).map(i => i + 1).join('·')}</span>`;
 
-  const wholeHash = (file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null;
+  const perFile = (fn) => { const known = new WeakMap(); return (file) => { if (!known.has(file)) known.set(file, fn(file)); return known.get(file); }; };
+  const wholeHash = perFile((file) => file.hunks ? hashStr(JSON.stringify(file.hunks)) : null);
   const flatLines = (file) => { const sh = shareOf(file); return file.hunks ? file.hunks.flatMap(h => h.lines.filter(l => !sh || sh.owns(l)).map(l => l.t + l.text)) : null; };
-  const fhash = (file) => shareOf(file) ? hashStr(JSON.stringify(flatLines(file))) : wholeHash(file);
+  const fhash = perFile((file) => shareOf(file) ? hashStr(JSON.stringify(flatLines(file))) : wholeHash(file));
   const fileShot = (file) => { const lines = flatLines(file); return { h: fhash(file), lines: lines && lines.length <= LINE_CAP ? lines : null, ...(shareOf(file) ? { own: true } : {}) }; };
   const textOf = (f) => ({ scenario: f.scenario || '', description: f.description || '', tested: f.tested || '' });
   const entityShots = (f) => Object.fromEntries((f.entities || []).map(e => [e.name, hashStr(JSON.stringify(e))]));
@@ -183,9 +316,9 @@
     }
     return out;
   }
-  let sinceMemo = { id: null, val: null };
-  const sinceOf = (f) => (sinceMemo.id === f.id ? sinceMemo.val : (sinceMemo = { id: f.id, val: since(f) }).val);
-  const forgetSince = () => { sinceMemo = { id: null, val: null }; };
+  const sinceMemo = new Map();
+  const sinceOf = (f) => { if (!sinceMemo.has(f.id)) sinceMemo.set(f.id, since(f)); return sinceMemo.get(f.id); };
+  const forgetSince = () => sinceMemo.clear();
   /** Paths whose hunks differ from what the reviewer last saw. */
   const changedSince = (f) => Object.keys(sinceOf(f).files).sort();
 
@@ -216,35 +349,37 @@
   }
 
   // ---- blocks
-  function shots(s) {
-    if (!s) return `<p class="none">No user-visible surface, so no screenshots.</p>`;
-    const fig = (label, src) => src ? `<figure><div class="label">${label}</div><img src="${src}" alt="${label}"></figure>` : '';
-    return `<div class="shots">${fig('Before', s.before_src)}${fig('After', s.after_src)}</div>` + (s.caption ? `<figcaption>${esc(s.caption)}</figcaption>` : '');
+  function shots(s, ofCase) {
+    const pair = s.before_src && s.after_src;
+    const fig = (label, src) => src ? `<figure>${ofCase && !pair ? '' : `<div class="label">${label}</div>`}<img src="${src}" alt="${ofCase && !pair ? esc(s.caption || 'Screenshot') : label}"></figure>` : '';
+    return `<div class="shots${pair ? '' : ' one'}">${fig('Before', s.before_src)}${fig('After', s.after_src)}</div>` + (s.caption ? `<figcaption>${esc(s.caption)}</figcaption>` : '');
   }
 
+  const exampleShown = new Map();
   function entities(f) {
     const es = f.entities || [];
-    if (!es.length) return `<p class="none">No domain entity added or changed.</p>`;
-    const chip = (c, own) => c && c !== own ? `<span class="chip ${c}">${c}</span>` : '';
+    if (!es.length) return `<p class="d4-none">No domain entity added or changed.</p>`;
+    const change = (c, own) => c && c !== own ? `<i class="chg ${c}">${c}</i>` : '';
     const parts = (label, ps, own) => ps?.length ? `<div class="parts"><div class="plabel">${label}</div>
-      ${ps.map(p => `<div class="part ${p.change || ''}"><div class="pname"><code>${esc(p.name)}</code>${p.type ? `<span class="ptype">${esc(p.type)}</span>` : ''}${chip(p.change, own)}</div>
+      ${ps.map(p => `<div class="part ${p.change || ''}"><div class="pname"><code>${esc(p.name)}</code>${p.type ? `<span class="ptype">${esc(p.type)}</span>` : ''}${change(p.change, own)}</div>
         <div class="pmeaning">${esc(p.meaning)}${p.why ? `<div class="pwhy">${esc(p.why)}</div>` : ''}</div></div>`).join('')}</div>` : '';
     const examplesOf = (e) => e.examples?.length ? e.examples : e.example !== undefined ? [{ title: 'Example', value: e.example }] : [];
     const examples = (e, i) => {
-      const exs = examplesOf(e);
+      const exs = examplesOf(e), on = Math.min(exampleShown.get(`${f.id}\n${i}`) || 0, exs.length - 1);
       if (!exs.length) return '';
       return `<div class="examples" data-entity="${i}">
-        <div class="tabs">${exs.map((x, j) => `<button type="button" class="${j ? '' : 'on'}" data-ex="${j}">${esc(x.title || `Example ${j + 1}`)}</button>`).join('')}</div>
-        ${exs.map((x, j) => `<div class="ex" data-ex="${j}" ${j ? 'hidden' : ''}>${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}<div class="editor"><pre><code>${esc(exampleText(x))}</code></pre></div></div>`).join('')}
+        <div class="tabs">${exs.map((x, j) => `<button type="button" class="${j === on ? 'on' : ''}" data-ex="${j}">${esc(x.title || `Example ${j + 1}`)}</button>`).join('')}</div>
+        ${exs.map((x, j) => `<div class="ex" data-ex="${j}" ${j === on ? '' : 'hidden'}>${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}<div class="editor"><pre><code>${esc(exampleText(x))}</code></pre></div></div>`).join('')}
       </div>`;
     };
     const moved = sinceOf(f).entities;
-    return es.map((e, i) => `<div class="entity ${e.change} ${examplesOf(e).length ? 'with-examples' : ''} ${moved.has(e.name) ? 'moved' : ''}">
-      <div class="eh"><span class="chip ${e.change}">${e.change}</span><span class="ename">${esc(e.name)}</span>${moved.has(e.name) ? `<span class="upd">reworked since you looked</span>` : ''}${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}${e.file ? `<span class="efile">${esc(e.file)}</span>` : ''}</div>
-      <div class="ebody"><div class="etext">
+    return es.map((e, i) => `<div class="d4-row ent ${e.change || ''}">
+      <div class="d4-main">
+        <p class="eh"><code class="ename">${esc(e.name)}</code>${change(e.change)}${e.kind ? `<span class="ekind">${esc(e.kind)}</span>` : ''}${e.from ? `<span class="efrom">was <code>${esc(e.from)}</code></span>` : ''}</p>
         <div class="esum">${esc(e.summary)}${e.why ? `<div class="ewhy">${esc(e.why)}</div>` : ''}</div>
         ${parts('Consists of', e.fields, e.change)}${parts('What you can do', e.operations, e.change)}
-      </div>${examples(e, i)}</div>
+      </div>
+      <div class="d4-note">${moved.has(e.name) ? '<p class="call">Reworked since you looked.</p>' : ''}${e.file ? `<p class="efile">${esc(e.file)}</p>` : ''}${examples(e, i)}</div>
     </div>`).join('');
   }
   const exampleText = (x) => typeof x.value === 'string' ? x.value : JSON.stringify(x.value, null, 2);
@@ -273,27 +408,48 @@
     }, () => done(null));
   });
   const monacoTheme = () => root.dataset.theme === 'dark' ? 'zreview-dark' : 'zreview-light';
-  function mountEditors(f) {
-    editors.splice(0).forEach(ed => ed.dispose());
+  let editorWatch = null;
+  function mountEditors(pairs) {
+    editorWatch?.disconnect();
+    editorWatch = null;
     if (!monacoApi) return;
-    (f.entities || []).forEach((e, i) => {
+    const waiting = new Map(), live = new Set();
+    for (const [f, root] of pairs) (f.entities || []).forEach((e, i) => {
       const exs = e.examples?.length ? e.examples : e.example !== undefined ? [{ title: 'Example', value: e.example }] : [];
       exs.forEach((x, j) => {
-        const host = main.querySelector(`.examples[data-entity="${i}"] .ex[data-ex="${j}"] .editor`);
+        const host = root.querySelector(`.examples[data-entity="${i}"] .ex[data-ex="${j}"] .editor`);
         if (!host) return;
-        host.replaceChildren();
-        const ed = monacoApi.editor.create(host, {
-          value: exampleText(x), language: exampleLang(x), theme: monacoTheme(), readOnly: true, domReadOnly: true,
-          minimap: { enabled: false }, scrollBeyondLastLine: false, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, glyphMargin: false,
-          fontSize: 12, lineHeight: 19, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', renderLineHighlight: 'none', wordWrap: 'on',
-          scrollbar: { alwaysConsumeMouseWheel: false, verticalScrollbarSize: 8 }, overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
-          bracketPairColorization: { enabled: true }, guides: { bracketPairs: true, indentation: true }, padding: { top: 10, bottom: 10 }, automaticLayout: true,
-        });
-        const fit = () => { host.style.height = `${Math.min(ed.getContentHeight(), 560)}px`; ed.layout(); };
-        ed.onDidContentSizeChange(fit); fit();
-        editors.push(ed);
+        const id = `${f.id}\n${i}\n${j}`, kept = editors.get(id);
+        live.add(id);
+        if (kept) host.replaceWith(kept.host); else waiting.set(host, { id, x });
       });
     });
+    for (const [id, kept] of editors) if (!live.has(id)) { kept.ed.dispose(); editors.delete(id); }
+    const mount = (host) => {
+      const { id, x } = waiting.get(host);
+      waiting.delete(host);
+      host.replaceChildren();
+      const ed = monacoApi.editor.create(host, {
+        value: exampleText(x), language: exampleLang(x), theme: monacoTheme(), readOnly: true, domReadOnly: true,
+        minimap: { enabled: false }, scrollBeyondLastLine: false, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, glyphMargin: false,
+        fontSize: 12, lineHeight: 19, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', renderLineHighlight: 'none', wordWrap: 'on',
+        scrollbar: { alwaysConsumeMouseWheel: false, verticalScrollbarSize: 8 }, overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
+        bracketPairColorization: { enabled: true }, guides: { bracketPairs: true, indentation: true }, padding: { top: 10, bottom: 10 }, automaticLayout: true,
+      });
+      const fit = () => { host.style.height = `${Math.min(ed.getContentHeight(), 560)}px`; ed.layout(); };
+      ed.onDidContentSizeChange(fit); fit();
+      editors.set(id, { ed, host });
+    };
+    const hosts = [...waiting.keys()], folded = hosts.filter(host => !host.offsetParent);
+    hosts.filter(host => host.offsetParent).forEach(mount);
+    if (!folded.length) return;
+    if (!window.IntersectionObserver) return folded.forEach(mount);
+    editorWatch = new IntersectionObserver((hits) => hits.forEach(hit => {
+      if (!hit.isIntersecting || !waiting.has(hit.target)) return;
+      editorWatch.unobserve(hit.target);
+      mount(hit.target);
+    }));
+    folded.forEach(host => editorWatch.observe(host));
   }
 
   const OPEN_UP_TO = 150;
@@ -302,22 +458,31 @@
     return sh ? (sh.hasAlone ? sh.exAdd + sh.exDel : sh.add + sh.del) : (file.add || 0) + (file.del || 0);
   };
   const isOpen = (f, file) => expanded[f.id]?.get(file.path) ?? (!!file.hunks?.length && !isViewed(f, file) && shownSize(file) <= OPEN_UP_TO);
-  function fileBlock(f, file) {
+  const pathHtml = (path) => {
+    const cut = path.lastIndexOf('/') + 1;
+    return `<span class="dir">${esc(path.slice(0, cut)).replaceAll('/', '/<wbr>')}</span><b>${esc(path.slice(cut))}</b>`;
+  };
+  function fileBlock(f, file, unit, cur) {
     const open = isOpen(f, file), seen = isViewed(f, file), ch = sinceOf(f).files[file.path];
     const upd = !!ch, chip = ch?.added != null ? `${ch.added} new line${ch.added === 1 ? '' : 's'}${ch.gone ? `, ${ch.gone} gone` : ''}` : 'updated since your last look';
     const sh = shareOf(file);
-    const counts = (a, d) => `<span class="a">+${a}</span> <span class="d">−${d}</span>`;
+    const tally = (a, d) => [a ? `+${a}` : '', d ? `−${d}` : ''].filter(Boolean).join(' ');
+    const counts = (a, d) => [a ? `<span class="a">+${a}</span>` : '', d ? `<span class="d">−${d}</span>` : ''].filter(Boolean).join(' ');
     const sharedAdd = sh ? sh.add - sh.exAdd : 0, sharedDel = sh ? sh.del - sh.exDel : 0;
     const stat = !file.hunks ? '' : sh
-      ? `<span class="stat">${sh.hasAlone ? counts(sh.exAdd, sh.exDel) : ''}${sharedAdd + sharedDel ? `<span class="shared" title="${esc(`Lines this feature shares with ${ownerNames(sh.others)}`)}">+${sharedAdd} −${sharedDel} shared</span>` : ''}<span class="of">of +${file.add} −${file.del}</span></span>`
+      ? `<span class="stat">${sh.hasAlone ? counts(sh.exAdd, sh.exDel) : ''}${sharedAdd + sharedDel ? `<span class="shared" title="${esc(`Lines this feature shares with ${ownerNames(sh.others)}`)}">${tally(sharedAdd, sharedDel)} shared</span>` : ''}${file.add + file.del ? `<span class="of">of ${tally(file.add, file.del)}</span>` : ''}</span>`
       : `<span class="stat">${counts(file.add, file.del)}</span>`;
     const also = sh?.others.length ? `<span class="also" title="${esc(`Also changed by ${ownerNames(sh.others)}`)}">also in ${sh.others.map(i =>
       `<a href="#${esc(data.features[i].id)}" target="_self" onclick="event.stopPropagation()">${i + 1}</a>`).join(' ')}</span>` : '';
     const firstLine = sh && file.hunks.flatMap(h => h.lines).find(l => sh.main(l));
     const url = firstLine ? `${file.url}${firstLine.t === '+' ? `R${firstLine.new}` : `L${firstLine.old}`}` : file.url;
-    return `<div class="file ${seen ? 'seen' : ''}" data-path="${esc(file.path)}">
-      <div class="fh"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${esc(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${mdToggle(file)}${also}${stat}<a href="${esc(url)}" onclick="event.stopPropagation()">GitHub ↗</a><label class="viewed" onclick="event.stopPropagation()"><input type="checkbox" ${seen ? 'checked' : ''} ${submitted ? 'disabled' : ''}>Viewed</label></div>
-      ${open ? fileBody(f, file) : ''}
+    const says = seen ? `${file.path} is viewed. Take it back` : `Mark ${file.path} as viewed`;
+    const said = entry(f.id).comments.filter(c => c.kind === 'file' && c.file === file.path);
+    return `<div class="file ${seen ? 'seen' : ''}${unit && unit === cur ? ' cur' : ''}" data-path="${esc(file.path)}"${unit ? ` data-unit="${unit}"` : ''}>
+      <div class="fh"><button type="button" class="d4-sign fv" aria-pressed="${seen}" aria-label="${esc(says)}" title="${esc(says)}" ${submitted ? 'disabled' : ''}>${seen ? '✓' : ''}</button>
+        <div class="fline"><span class="tri">${open ? '▾' : '▸'}</span><span class="path">${pathHtml(file.path)}</span>${file.status ? `<span class="st">${esc(file.status)}</span>` : ''}${stat}${upd ? `<span class="upd">${esc(chip)}</span>` : ''}${also}${mdToggle(file)}${file.url ? `<a href="${esc(url)}" onclick="event.stopPropagation()">on GitHub</a>` : ''}</div></div>
+      ${said.map(c => `<div class="lc"><div class="who">file comment${delBtn(c)}</div>${esc(c.body)}</div>`).join('')}
+      ${open ? `<div class="fbody">${fileBody(f, file)}</div>` : ''}
     </div>`;
   }
 
@@ -331,7 +496,13 @@
     const l = LANG[ext] ?? ext;
     return window.hljs?.getLanguage(l) ? l : null;
   }
+  const hlKnown = new Map();
   function hlLines(text, lang) {
+    const known = `${lang}\n${text}`;
+    if (!hlKnown.has(known)) hlKnown.set(known, hlSplit(text, lang));
+    return hlKnown.get(known);
+  }
+  function hlSplit(text, lang) {
     let html;
     try { html = lang ? hljs.highlight(text, { language: lang, ignoreIllegals: true }).value : esc(text); } catch { html = esc(text); }
     const out = [], open = []; let cur = '', last = 0, m;
@@ -356,7 +527,7 @@
     // unchanged block in the rendered view, or one whose line the author's rework moved out of the diff.
     const rows = new Set(file.hunks.flatMap(h => h.lines.map(l => l.t === '-' ? `old ${l.old}` : `new ${l.new}`)));
     const outside = cs.filter(c => !rows.has(`${c.side} ${c.line}`)).map(c =>
-      `<div class="lc outside"><div class="who">${c.side === 'old' ? 'old ' : ''}line ${c.line}, outside the diff<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
+      `<div class="lc outside"><div class="who">${c.side === 'old' ? 'old ' : ''}line ${c.line}, outside the diff${delBtn(c)}</div>${esc(c.body)}</div>`).join('');
     const sh = shareOf(file);
     const lines = file.hunks.flatMap((h, hi) => {
       const oh = hlLines(h.lines.filter(l => l.t !== '+').map(l => l.text).join('\n'), lang);
@@ -385,7 +556,7 @@
       const isNew = fresh?.[i];
       return `<div class="dl ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : ''} ${kind} ${mine.length ? 'has' : ''} ${isNew ? 'fresh' : ''}" data-side="${side}" data-line="${line}" ${isNew ? 'title="New since your last look"' : ''}>
           <span class="g">${l.old ?? ''}</span><span class="g">${l.new ?? ''}</span><span class="code"><span class="sign">${l.t}</span>${code}</span>${tagged ? ownerTag(whoElse(l), kind === 'shared') : ''}</div>` +
-        mine.map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
+        mine.map(c => `<div class="lc"><div class="who">line comment${delBtn(c)}</div>${esc(c.body)}</div>`).join('');
     };
     const foldKey = (i) => `${f.id}\n${file.path}\n${i}`;
     const fold = (i, j) => {
@@ -693,7 +864,7 @@
     const row = (i, tag) => {
       const e = rows[i], side = e.kind === 'del' ? 'old' : 'new', u = unitOn(e, side), nw = isFresh(e);
       const kind = rowKind(e);
-      const notes = (own.get(i) || []).map(c => `<div class="lc"><div class="who">line comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('');
+      const notes = (own.get(i) || []).map(c => `<div class="lc"><div class="who">line comment${delBtn(c)}</div>${esc(c.body)}</div>`).join('');
       const body = kind === 'foreign' ? `${ownerTag(theirsOf(e))}<div class="dim">${entryHtml(e)}</div>`
         : kind === 'shared' ? `${ownerTag(theirsOf(e), true)}${entryHtml(e)}` : entryHtml(e);
       return `<${tag} class="rd-u ${e.kind}${kind ? ` ${kind}` : ''} t-${u.type}${nw ? ' fresh' : ''}" data-side="${side}" data-line="${u.from}"${nw ? ' title="New since your last look"' : ''}>`
@@ -787,121 +958,791 @@
     }
   }
 
-  function commentList(f) {
+  function commentList(f, what = 'feature') {
     const cs = entry(f.id).comments;
-    if (!cs.length) return `<p class="none">No comments on this feature.</p>`;
+    if (!cs.length) return `<p class="none">No comments on this ${what}.</p>`;
     return cs.map(c => `<div class="cm">
-      <div class="who"><span class="where">${c.kind === 'line' ? `${esc(c.file)}:${c.line} (${c.side})` : c.kind === 'file' ? esc(c.file) : esc(c.section)}</span><button data-del="${c.id}">delete</button></div>
+      <div class="who"><span class="where">${c.kind === 'line' ? `${esc(c.file)}:${c.line} (${c.side})` : c.kind === 'file' ? esc(c.file) : esc(c.section)}</span>${delBtn(c)}</div>
       ${c.quote ? `<div class="quote">${esc(c.quote)}</div>` : ''}${esc(c.body)}</div>`).join('');
   }
 
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const servedBy = (id) => ({
+    features: data.features.filter(f => (f.serves || []).includes(id)),
+    rules: data.features.flatMap(f => (f.rules || []).filter(r => (r.serves || []).includes(id))),
+  });
+  const checkedBy = (id) => data.features.flatMap(f => (f.behaviours || []).filter(b => (b.checks || []).includes(id)));
+  const codeOf = (b, path) => {
+    const has = (f) => (f.files || []).some(x => x.path === path && x.hunks?.length);
+    return data.features.find(f => (f.behaviours || []).includes(b) && has(f)) || data.features.find(has);
+  };
+
+  const WHOLE = {
+    '@high': 'Nothing is missing: these goals and limits are the whole purpose of the change.',
+    '@mid': 'Nothing is missing: these scenarios and rules are everything the product does differently.',
+    '@low': 'Nothing is missing: these behaviours are the cases a tester would try.',
+  };
+  const KIND = { goal: 'Goal', 'non-goal': 'Out of scope', rule: 'Rule', behaviour: 'Behaviour' };
+  const PROOF = { test: 'A test in this PR', stand: 'Seen on a stand', reading: 'Read in the code, no test', none: 'Not covered' };
+  const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
+  const clauses = new Map(), sections = {}, order = {};
+  if (LAYERED) {
+    const put = (level, sec, kind, src, id = src.id) => { clauses.set(id, { id, level, kind, src }); sec.ids.push(id); };
+    const high = [], mid = [], low = [];
+    if (!ABSENT) {
+      const goals = { title: 'Goals', ids: [] }, out = { title: 'Out of scope', ids: [], none: 'None stated.' };
+      for (const g of data.purpose.goals || []) put('@high', goals, 'goal', g);
+      for (const g of data.purpose.nonGoals || []) put('@high', out, 'non-goal', g);
+      high.push(goals, out);
+    }
+    data.features.forEach((f, i) => {
+      const m = { n: i + 1, title: f.title, feature: f, ids: [] };
+      put('@mid', m, 'scenario', f);
+      for (const r of f.rules || []) put('@mid', m, 'rule', r);
+      mid.push(m);
+      const l = { n: i + 1, title: f.title, feature: f, ids: [], none: 'No behaviour is written for this.' };
+      for (const b of f.behaviours || []) put('@low', l, 'behaviour', b);
+      low.push(l);
+    });
+    const libs = { title: 'New libraries and frameworks', ids: [], none: `None. ${data.alignment?.manifests?.length ? data.librariesNote || '' : 'No package manifest changed in this PR.'}` };
+    for (const lib of data.libraries || []) put('@low', libs, 'library', lib, `lib:${lib.name}`);
+    low.push(libs);
+    for (const [level, list] of [['@high', high], ['@mid', mid], ['@low', low]]) {
+      const whole = { title: 'The level as a whole', ids: [] };
+      put(level, whole, 'whole', {}, `${level}*`);
+      list.push(whole);
+      sections[level] = list;
+      order[level] = list.flatMap(s => s.ids);
+    }
+  }
+  const unserved = new Set(data.alignment?.unserved || []), unchecked = new Set(data.alignment?.unchecked || []);
+  const around = (level) => level === '@high' ? [data.purpose.summary, data.purpose.domain, data.purpose.sources, ...(data.pr.exposure ? [data.pr.exposure] : [])]
+    : level === '@mid' ? data.features.map(f => [f.title, (f.entities || []).map(e => [e.label, e.change, e.summary]), f.screenshots?.caption])
+    : [data.features.map(f => [f.title, f.diagrams]), data.librariesNote];
+  const clauseHash = (c) => hashStr(JSON.stringify(
+    c.kind === 'whole' ? [order[c.level], around(c.level)] : c.kind === 'scenario' ? [c.src.scenario, c.src.serves, c.src.derived] : c.src,
+    (k, v) => k === 'before_src' || k === 'after_src' ? undefined : v));
+  const stepWords = (b) => [['Given', b.given], ['When', b.when], ['Then', b.then]]
+    .filter(([, list]) => list?.length).map(([kw, list]) => `${kw} ${list.join(', and ')}.`).join(' ');
+  const clauseText = (c) => c.kind === 'whole' ? ''
+    : c.kind === 'scenario' ? c.src.scenario || ''
+    : c.kind === 'behaviour' ? `${c.src.title}. ${stepWords(c.src)}`.trim()
+    : c.kind === 'library' ? `${c.src.name}${c.src.version ? ` ${c.src.version}` : ''}: ${c.src.why}`
+    : c.src.text;
+  const clauseName = (c) => c.kind === 'whole' ? 'The level as a whole' : c.kind === 'scenario' ? `Scenario of ${c.src.id}` : c.kind === 'library' ? `Library ${c.src.name}` : c.id;
+  const rowOf = (id) => { const c = clauses.get(id); return c && state[c.level]?.rows?.[id]; };
+  const dec = (id) => rowOf(id)?.d;
+  const tallyOf = (level) => {
+    const ids = order[level] || [], ok = ids.filter(x => dec(x) === 'ok').length, ch = ids.filter(x => dec(x) === 'change').length;
+    return { n: ids.length, ok, ch, open: ids.length - ok - ch };
+  };
+  const levelMoved = (level) => Object.values(state[level]?.rows || {}).some(r => r.was);
+  function settleLevel(level) {
+    const s = entry(level), t = tallyOf(level);
+    const decision = t.ch ? 'changes' : t.open ? undefined : 'approved';
+    if (s.decision === decision) return false;
+    if (decision) Object.assign(s, { decision, at: Date.now(), head: data.pr.head || 'plan' });
+    else { delete s.decision; delete s.at; delete s.head; }
+    return true;
+  }
+  function syncLevels() {
+    let moved = false;
+    for (const l of LEVELS) {
+      const rows = state[l.id]?.rows || {};
+      for (const [id, r] of Object.entries(rows)) {
+        const c = clauses.get(id);
+        if (!c || c.level !== l.id) { delete rows[id]; moved = true; continue; }
+        const same = r.hash === clauseHash(c);
+        if (r.d && !same) { r.was = r.d; delete r.d; moved = true; }
+        else if (r.was && same) { r.d = r.was; delete r.was; moved = true; }
+      }
+      if (settleLevel(l.id)) moved = true;
+    }
+    if (moved) save();
+  }
+
+  const cursor = {};
+  let composing = null, draft = '', pendingItem = null;
+  const at = (level) => {
+    const ids = order[level];
+    if (!ids.includes(cursor[level])) cursor[level] = ids.find(x => !dec(x)) || ids[0];
+    return cursor[level];
+  };
+  const dref = (id, text = id, quiet = false) => `<a class="dref" href="#${esc(items.get(id)?.level || '')}" target="_self" data-go="${esc(id)}"${quiet ? ' data-quiet' : ''}>${esc(text)}</a>`;
+  const drefs = (ids) => ids.map(id => dref(id)).join(', ');
+  const fref = (f) => dref(f.id, f.title);
+  function originOf(c) {
+    const s = c.src, from = s.from ? inl(String(s.from).replace(/\.$/, '')) : '';
+    if (s.source === 'stated') return { call: false, html: `Stated: ${from}.` };
+    if (s.source === 'decided') return { call: true, html: `The author’s call${from ? ` (${from})` : ''}. Yours to confirm.` };
+    if (s.source === 'inferred') return { call: true, html: 'Inferred from the change. Nobody wrote it down.' };
+    return null;
+  }
+  function cautions(c) {
+    const s = c.src, out = [];
+    if (c.kind === 'goal' && unserved.has(c.id)) out.push('Nothing in this PR serves it.');
+    if (c.kind === 'rule' && unchecked.has(c.id)) out.push('No behaviour checks it. Until one does, it is a promise.');
+    if (s.derived) out.push(`${c.kind === 'behaviour' ? 'Checks no rule.' : 'Serves no goal.'} ${inl(s.derived)}`);
+    if (s.flag) out.push(inl(s.flag));
+    return out;
+  }
+  function lapsed(c, r) {
+    const said = r.seen && r.seen !== clauseText(c) ? ` It said: “${inl(r.seen)}”` : '';
+    const asked = r.was === 'change' ? ` You asked: “${esc(r.note)}”` : '';
+    if (c.kind === 'whole') return `<b>The level changed since you ${asked ? 'asked for a change' : 'signed this'}.</b>${asked}`;
+    if (asked) return `<b>Reworked since you asked for a change.</b>${asked}${said}`;
+    return `<b>${said ? 'Reworded' : c.src.screenshots ? 'Its margin note or its screenshot changed' : 'Its margin note changed'} since you signed it.</b>${said}`;
+  }
+  function noteHtml(c, open) {
+    const s = c.src, r = rowOf(c.id), out = [];
+    const call = (html) => out.push(`<p class="call">${html}</p>`), quiet = (html) => out.push(`<p>${html}</p>`);
+    if (r?.was) call(lapsed(c, r));
+    if (c.kind === 'whole') {
+      if (open) quiet('Sign it when nothing is missing. Request a change to say what is.');
+    } else if (c.kind === 'library') {
+      if (s.where) quiet(`In ${inl(s.where)}.`);
+    } else if (c.kind === 'behaviour') {
+      const e = s.evidence, strong = e.by === 'test' || e.by === 'stand', warn = cautions(c);
+      const label = `<b>${e.by === 'test' && e.existing ? 'A test that was already there' : PROOF[e.by]}.</b>`;
+      if (!open) (strong && !warn.length ? quiet : call)(`${label}${warn.length ? ` ${plural(warn.length, 'warning')}.` : ''}`);
+      else {
+        const home = e.by === 'test' && codeOf(s, e.file), base = e.by === 'test' ? esc(e.file.split('/').pop()) : '';
+        const test = e.by !== 'test' ? '' : ` ${esc(e.name)}. ${home
+          ? `<a class="dref d4-file" href="#${esc(home.id)}" target="_self" data-code="${esc(e.file)}" data-find="${esc(e.name)}" title="Show this test in ${esc(e.file)}">${base}</a>`
+          : `<span class="d4-file" title="${esc(e.file)}">${base}</span>`}`;
+        (strong ? quiet : call)(`${label}${test}${e.note ? ` ${inl(e.note)}` : ''}`);
+        warn.forEach(call);
+        if (s.checks?.length) quiet(`Checks ${drefs(s.checks)}.`);
+      }
+    } else {
+      const o = originOf(c);
+      if (o?.call) call(o.html);
+      cautions(c).forEach(call);
+      if (c.kind === 'rule' && s.serves?.length) quiet(`Serves ${drefs(s.serves)}.`);
+      if (open) {
+        if (o && !o.call) quiet(o.html);
+        if (c.kind === 'scenario' && s.serves?.length) quiet(`Serves ${drefs(s.serves)}.`);
+        if (c.kind === 'goal' || c.kind === 'non-goal') {
+          const by = servedBy(c.id), who = [...by.features.map(f => fref(f)), ...by.rules.map(x => dref(x.id))];
+          if (who.length) quiet(`${c.kind === 'goal' ? 'Served by' : 'Held by'} ${who.join(', ')}.`);
+        }
+        if (c.kind === 'rule') { const bs = checkedBy(c.id); if (bs.length) quiet(`Checked by ${drefs(bs.map(b => b.id))}.`); }
+      }
+    }
+    return out.join('');
+  }
+  const stepsHtml = (b) => {
+    const rows = [['Given', b.given], ['When', b.when], ['Then', b.then]]
+      .flatMap(([kw, list]) => (list || []).map((t, i) => `<div class="kw">${i ? 'and' : kw}</div><div>${inl(t)}</div>`));
+    return rows.length ? `<div class="d4-steps">${rows.join('')}</div>` : '';
+  };
+  const libHtml = (l) => `${{ upgraded: 'Upgrades', removed: 'Removes' }[l.change] || 'Adds'} <code>${esc(l.name)}</code>${l.version ? ` ${esc(l.version)}` : ''}. ${inl(l.why)}`;
+  function clauseHtml(id, cur) {
+    const c = clauses.get(id), s = c.src, r = rowOf(id), d = r?.d || '', open = id === cur, shut = c.kind === 'behaviour' && !open;
+    const name = clauseName(c);
+    const tag = KIND[c.kind] ? `<span class="d4-id">${esc(id)}</span>` : '';
+    const text = c.kind === 'behaviour'
+      ? `<span class="d4-tx d4-bt">${inl(s.title)}${/[.!?]$/.test(s.title) ? '' : '.'}</span>${s.kind === 'edge' ? ' <span class="d4-case">Edge case.</span>' : s.kind === 'error' ? ' <span class="d4-case">Error case.</span>' : ''}${shut ? '' : stepsHtml(s)}`
+      : `<span class="d4-tx">${c.kind === 'scenario' ? inl(s.scenario || s.title) : c.kind === 'library' ? libHtml(s) : c.kind === 'whole' ? WHOLE[c.level] : inl(s.text)}</span>`;
+    const asked = d === 'change' ? `<p class="d4-asked"><b>Change requested.</b> ${esc(r.note)}</p>` : '';
+    const ask = c.kind === 'whole' ? 'What is missing, or here though nobody asked for it?' : c.kind === 'scenario' ? 'What should change in this scenario?' : `What should change in ${c.kind === 'library' ? s.name : id}?`;
+    const tools = submitted ? ''
+      : composing === id ? `<div class="d4-compose"><textarea id="d4-note" rows="2" placeholder="${esc(ask)}">${esc(draft)}</textarea>
+          <div class="row"><button type="button" class="d4-btn bad" data-act="save-ask">Request the change <kbd>${MOD}↵</kbd></button><button type="button" class="d4-btn ghost" data-act="cancel-ask">Cancel <kbd>Esc</kbd></button></div></div>`
+      : open ? `<span class="d4-acts"><button type="button" data-act="ask" data-id="${esc(id)}">${d === 'change' ? 'Edit the request' : 'Request a change'}</button>${d ? `<button type="button" data-act="undo" data-id="${esc(id)}">Undo</button>` : ''}</span>`
+      : '';
+    const act = shut && !d ? 'pick' : 'sign';
+    const says = act === 'pick' ? `Open ${name}` : d === 'ok' ? `${name} is signed. Undo` : d === 'change' ? `${name} has a change request. Edit it` : `Sign ${name}`;
+    const pic = c.kind === 'behaviour' && s.screenshots ? `<div class="d4-shots">${shots(s.screenshots, true)}</div>` : '';
+    return `<div class="d4-cl ${d} ${open ? 'cur' : ''}" data-item="${esc(id)}" data-act="pick" data-id="${esc(id)}">
+      <div class="d4-mg"><button type="button" class="d4-sign" data-act="${act}" data-id="${esc(id)}" aria-label="${esc(says)}" title="${esc(says)}" aria-pressed="${d === 'ok'}" ${submitted ? 'disabled' : ''}>${d === 'ok' ? '✓' : d === 'change' ? '✕' : ''}</button></div>
+      <div class="d4-main"><div class="commentable" data-section="${esc(id)}">${tag}${text}</div>${pic ? '' : `${asked}${tools}`}</div>
+      <div class="d4-note">${noteHtml(c, open)}</div>
+      ${pic}${pic && (asked || tools) ? `<div class="d4-after">${asked}${tools}</div>` : ''}
+    </div>`;
+  }
+  function sectionHtml(level, sec, cur) {
+    const f = sec.feature, more = [];
+    if (f && level === '@mid') {
+      const ents = (f.entities || []).filter(e => e.label);
+      if (ents.length) more.push(`<p class="d4-lead">It adds or changes:</p><ul class="d4-ents">${ents.map(e => `<li><b>${esc(e.label)}</b><i>${esc(e.change || '')}</i>${inl(e.summary || '')}</li>`).join('')}</ul>`);
+    }
+    const wide = !f ? '' : level === '@mid' && f.screenshots ? shots(f.screenshots) : level === '@low' && (f.diagrams || []).length ? f.diagrams.map(figure).join('') : '';
+    return `<section class="d4-s"><h2>${sec.n ? `${sec.n}. ` : ''}${esc(sec.title)}</h2>
+      ${sec.ids.map(id => clauseHtml(id, cur)).join('') || `<p class="d4-none">${inl(sec.none || '')}</p>`}
+      ${more.length ? `<div class="d4-extra">${more.join('')}</div>` : ''}
+      ${wide ? `<div class="d4-wide">${wide}</div>` : ''}
+      ${f ? `<p class="d4-extra"><a class="d4-link" href="#${esc(f.id)}" target="_self">${PLAN ? 'This part of the plan' : 'The code of this feature'}</a></p>` : ''}
+    </section>`;
+  }
+  function briefHtml(level) {
+    const al = data.alignment || {}, out = [];
+    const call = (html) => out.push(`<p class="call">${html}</p>`), quiet = (html) => out.push(`<p>${html}</p>`);
+    const derived = (al.derived || []).filter(x => x.level === (level === '@mid' ? 'mid' : 'low')).map(x => x.id);
+    if (level === '@mid') {
+      const rules = data.features.flatMap(f => f.rules || []);
+      const decided = rules.filter(r => r.source === 'decided'), inferred = rules.filter(r => r.source === 'inferred');
+      if (!ABSENT && al.unserved?.length) call(`Nothing in this PR serves ${drefs(al.unserved)}. Drop the goal, or find what is missing.`);
+      else if (!ABSENT) quiet('Every goal has something here that serves it.');
+      if (derived.length) call(`${derived.map(x => { const f = data.features.find(y => y.id === x); return f ? fref(f) : dref(x); }).join(', ')} ${derived.length === 1 ? 'serves' : 'serve'} no goal. Keep it, drop it, or add the goal it serves.`);
+      if (decided.length) quiet(`${plural(decided.length, 'rule is', 'rules are')} the author’s own call: ${drefs(decided.map(r => r.id))}.`);
+      if (inferred.length) quiet(`${plural(inferred.length, 'rule is', 'rules are')} read off the change, written down nowhere: ${drefs(inferred.map(r => r.id))}.`);
+    } else if (level === '@low') {
+      const ev = al.evidence || {}, n = ['test', 'stand', 'reading', 'none'].reduce((sum, k) => sum + (ev[k] || 0), 0);
+      if (n) quiet(`How the ${plural(n, 'behaviour is', 'behaviours are')} known: ${ev.test || 0} by a test, ${ev.stand || 0} on a stand, ${ev.reading || 0} by reading the code, ${ev.none || 0} not covered.`);
+      if (al.unchecked?.length) call(`No behaviour checks ${drefs(al.unchecked)}. Until one does, the rule is a promise.`);
+      else quiet('Every rule has a behaviour that checks it.');
+      if (derived.length) call(`${drefs(derived)} ${derived.length === 1 ? 'checks' : 'check'} no rule. Keep it, drop it, or add the rule above.`);
+    }
+    return out.join('');
+  }
+  function closingHtml(level) {
+    const t = tallyOf(level);
+    if (t.open) return '';
+    const L = LEVELS.find(l => l.id === level), next = LEVELS[LEVELS.indexOf(L) + 1];
+    const asks = order[level].filter(x => dec(x) === 'change'), rest = LEVELS.filter(l => tallyOf(l.id).open);
+    const onward = next ? `<a class="d4-btn" href="#${next.id}" target="_self">Go on to ${next.name}</a>`
+      : rest.length ? `<p>Still to read: ${rest.map(l => `<a href="#${l.id}" target="_self">${l.name}</a>`).join(', ')}.</p>`
+      : SERVED && !submitted ? `<button type="button" class="d4-btn go" data-act="submit">Submit the review</button>`
+      : `<p>Every level is read.</p>`;
+    const below = next || !data.features.length ? '' : `<a class="d4-btn ghost" href="#${CODE}" target="_self">Read the ${codeName.toLowerCase()}</a>`;
+    return `<section class="d4-closing ${t.ch ? 'has' : 'clean'}" id="closing">
+      <h3>${L.name} is read: ${t.ok} signed${t.ch ? `, ${plural(t.ch, 'change')} requested` : ''}.</h3>
+      ${asks.length ? `<ul>${asks.map(x => `<li><b>${esc(clauseName(clauses.get(x)))}</b>${esc(rowOf(x).note)}</li>`).join('')}</ul>` : ''}
+      ${onward}${below}
+    </section>`;
+  }
+  function levelHtml(level) {
+    const L = LEVELS.find(l => l.id === level), above = LEVELS[LEVELS.indexOf(L) - 1], t = tallyOf(level), cur = at(level), p = data.purpose;
+    const upper = above && state[above.id]?.decision;
+    const gate = above && upper !== 'approved' ? `<p class="d4-gate">${upper === 'changes' ? `You asked for changes on ${above.name}.` : `${above.name} is not signed off yet.`} This level is read against it, so what is here may still move. <a href="#${above.id}" target="_self">Back to ${above.name}</a></p>` : '';
+    const source = (s) => `<p class="d4-src ${s.read ? '' : 'unread'}"><b>${s.read ? 'Read' : 'Not read'}</b>${s.url ? `<a href="${esc(s.url)}">${esc(s.label)}</a>` : esc(s.label)}.${s.note ? ` ${inl(s.note)}` : ''}</p>`;
+    const reach = data.pr.exposure ? `<p class="commentable" data-section="exposure"><span class="d4-id">Who it reaches</span>${inl(data.pr.exposure)}</p>` : '';
+    const where = PLAN ? `A plan for ${esc(data.pr.repo)}, not built yet.`
+      : `<a href="${esc(data.pr.url)}">${esc(data.pr.repo)}#${data.pr.number}</a>${data.pr.head ? ` at <code>${esc(data.pr.head)}</code>` : ''}${data.pr.base ? `, into <code>${esc(data.pr.base)}</code>` : ''}.`;
+    const lede = level !== '@high' ? '' : `<div class="d4-lede"><p class="commentable" data-section="summary">${inl(p.summary)}</p>${p.domain ? `<p class="commentable" data-section="domain">${inl(p.domain)}</p>` : ''}${reach}${(p.sources || []).map(source).join('')}<p class="d4-src">${where}</p></div>`;
+    const legend = level === '@low'
+      ? 'The margin says how each behaviour is known. A note with a bar beside it needs your judgment. A behaviour shows its steps and its proof when you are on it, and you can sign it only then.'
+      : 'A margin note with a bar beside it needs your judgment. The clause you are on also shows where it comes from and what it connects to.';
+    const keys = submitted ? '' : `<ul class="d4-keys"><li><kbd>↵</kbd>sign and go on</li><li><kbd>X</kbd>request a change</li><li><kbd>U</kbd>undo</li><li><kbd>J</kbd><kbd>K</kbd>move down, up</li><li><kbd>N</kbd>next unsigned</li><li><kbd>F</kbd>other typeface</li></ul>`;
+    const bar = submitted || !t.open ? '' : `<div class="d4-bar"><button type="button" class="d4-btn" data-act="next">Next unsigned clause <kbd>N</kbd></button><span>${t.open} of ${t.n} left</span></div>`;
+    return `<div class="d4w"><article class="d4">
+      <header class="d4-h"><p class="d4-lv">${L.name} level</p><h1>${esc(L.title)}</h1><p class="d4-ask">${esc(L.ask)}</p></header>
+      ${gate}${lede}
+      <div class="d4-front"><div class="d4-legend"><p>${legend}</p>${briefHtml(level)}</div>${keys}</div>
+      ${sections[level].map(sec => sectionHtml(level, sec, cur)).join('')}
+      ${entry(level).comments.length ? `<section class="d4-comments"><h2>Comments</h2>${commentList({ id: level }, 'level')}</section>` : ''}
+      ${closingHtml(level)}
+    </article>${bar}</div>`;
+  }
+
+  const pop = document.getElementById('pop');
+  function showPop(b) {
+    const id = b.dataset.go, it = items.get(id);
+    if (!it || 'quiet' in b.dataset) return;
+    const f = it.kind === 'feature' && data.features.find(x => x.id === id);
+    pop.innerHTML = `<b>${f ? `Scenario ${data.features.indexOf(f) + 1}` : `${KIND[it.kind]} ${esc(id)}`}</b>${inl(f ? f.scenario || f.title : it.text)}`;
+    pop.hidden = false;
+    const r = b.getBoundingClientRect(), below = r.bottom + 8 + pop.offsetHeight <= innerHeight;
+    pop.style.left = `${Math.max(12, Math.min(innerWidth - pop.offsetWidth - 12, r.left))}px`;
+    pop.style.top = `${below ? r.bottom + 8 : Math.max(8, r.top - pop.offsetHeight - 8)}px`;
+  }
+  for (const [on, off] of [['mouseover', 'mouseout'], ['focusin', 'focusout']]) {
+    main.addEventListener(on, (e) => { const b = e.target.closest?.('.d4 [data-go]'); if (b) showPop(b); });
+    main.addEventListener(off, (e) => { if (e.target.closest?.('.d4 [data-go]')) pop.hidden = true; });
+  }
+
+  const clauseEl = (id) => id ? main.querySelector(`[data-item="${CSS.escape(id)}"]`) : null;
+  const inView = (id) => { const box = clauseEl(id)?.getBoundingClientRect(); return !!box && box.top >= 0 && box.top < innerHeight - 110; };
+  function drawLevel(how, anchor) {
+    const level = shownId, top = clauseEl(anchor)?.getBoundingClientRect().top;
+    pop.hidden = true;
+    main.innerHTML = levelHtml(level);
+    main.querySelector('.d4w').onclick = levelClick;
+    drawFigures();
+    const note = document.getElementById('d4-note');
+    if (note) {
+      note.oninput = () => { draft = note.value; };
+      note.focus({ preventScroll: true });
+      note.setSelectionRange(note.value.length, note.value.length);
+    }
+    highlight({ id: level });
+    const now = clauseEl(anchor);
+    if (how === 'closing') main.querySelector('#closing')?.scrollIntoView({ block: 'center' });
+    else if (how === 'center') now?.scrollIntoView({ block: 'center' });
+    else if (now && top !== undefined) scrollBy(0, now.getBoundingClientRect().top - top);
+  }
+  function decide(id, record, viaKey) {
+    const c = clauses.get(id), ids = order[c.level];
+    (entry(c.level).rows ||= {})[id] = { ...record, hash: clauseHash(c), seen: clauseText(c), at: Date.now() };
+    composing = null;
+    const open = (x) => x !== id && !dec(x);
+    const next = ids.slice(ids.indexOf(id) + 1).find(open) || ids.find(open);
+    cursor[c.level] = next || id;
+    settleLevel(c.level); save(); renderNav();
+    drawLevel(!next ? 'closing' : viaKey ? 'center' : 'anchor', viaKey ? next : id);
+  }
+  function undo(id) {
+    const level = clauses.get(id).level;
+    delete entry(level).rows?.[id];
+    composing = null; cursor[level] = id;
+    settleLevel(level); save(); renderNav();
+    drawLevel('anchor', id);
+  }
+  function ask(id) {
+    const level = clauses.get(id).level, shown = inView(id);
+    if (composing !== id) draft = rowOf(id)?.note || '';
+    cursor[level] = id; composing = id;
+    drawLevel(shown ? 'anchor' : 'center', id);
+  }
+  function saveAsk(viaKey) {
+    const note = document.getElementById('d4-note');
+    if (!composing || !note) return;
+    const text = note.value.trim();
+    if (!text) { note.placeholder = 'Say what should change, then save.'; note.focus(); return; }
+    decide(composing, { d: 'change', note: text }, viaKey);
+  }
+  function cancelAsk() { const id = composing; composing = null; drawLevel('anchor', id); }
+  function pick(id, viaKey) {
+    cursor[clauses.get(id).level] = id; composing = null;
+    drawLevel(viaKey ? 'center' : 'anchor', id);
+  }
+  function move(step) {
+    const ids = order[shownId], i = ids.indexOf(at(shownId));
+    pick(ids[Math.max(0, Math.min(ids.length - 1, i + step))], true);
+  }
+  function nextOpen() {
+    const ids = order[shownId], id = at(shownId), open = (x) => !dec(x);
+    const next = open(id) && !inView(id) ? id : ids.slice(ids.indexOf(id) + 1).find(open) || ids.find(open);
+    if (next) pick(next, true);
+  }
+  let pendingCode = null;
+  function goCode(id, path, find) {
+    pendingCode = { id, path, find };
+    current = CODE; location.hash = CODE; render();
+  }
+  function levelClick(e) {
+    const ref = e.target.closest('[data-go]');
+    if (ref) { e.preventDefault(); const it = items.get(ref.dataset.go); if (it) go(it.level, ref.dataset.go); return; }
+    const code = e.target.closest('[data-code]');
+    if (code) { e.preventDefault(); goCode(code.getAttribute('href').slice(1), code.dataset.code, code.dataset.find); return; }
+    const del = e.target.closest('[data-del]');
+    if (del) { const cs = entry(shownId).comments; cs.splice(cs.findIndex(c => c.id === del.dataset.del), 1); save(); render(); return; }
+    const b = e.target.closest('[data-act]');
+    if (!b || b.disabled) return;
+    const act = b.dataset.act, id = b.dataset.id;
+    if (e.target.closest('.d4-compose') && !b.closest('.d4-compose')) return;
+    if (act === 'pick') { if (!String(getSelection()) && !e.target.closest('a') && id !== at(shownId)) pick(id); return; }
+    if (act === 'next') return nextOpen();
+    if (submitted) return;
+    if (act === 'sign') return dec(id) === 'ok' ? undo(id) : dec(id) === 'change' ? ask(id) : decide(id, { d: 'ok' });
+    if (act === 'ask') return ask(id);
+    if (act === 'undo') return undo(id);
+    if (act === 'save-ask') return saveAsk();
+    if (act === 'cancel-ask') return cancelAsk();
+    if (act === 'submit') return document.getElementById('submit').click();
+  }
+  const onLevel = () => LAYERED && current.startsWith('@') && shownId === current && !focusOpen() && zoom.hidden;
+  function levelKey(e) {
+    const t = e.target;
+    if (shownId === CODE) return codeKey(e);
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable) {
+      if (t.id !== 'd4-note' || e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return false;
+      e.preventDefault(); saveAsk(true);
+      return true;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, id = at(shownId);
+    const acts = k === 'Enter' || k === 'x' || k === 'u';
+    if (k === 'Enter' && t.closest?.('button, a, summary')) return false;
+    if (k === 'j') move(1);
+    else if (k === 'k') move(-1);
+    else if (k === 'n') nextOpen();
+    else if (k === 'f') toggleFace();
+    else if (!acts || submitted) return false;
+    else if (!inView(id)) pick(id, true);
+    else if (k === 'Enter') dec(id) ? nextOpen() : decide(id, { d: 'ok' }, true);
+    else if (k === 'x') ask(id);
+    else if (dec(id)) undo(id);
+    e.preventDefault();
+    return true;
+  }
+
+  function reveal() {
+    if (!pendingItem) return;
+    const el = clauseEl(pendingItem);
+    pendingItem = null;
+    if (!el) return;
+    el.scrollIntoView({ block: 'center' });
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  }
+  function go(id, item) {
+    pendingItem = item || null;
+    if (current !== id || shownId !== id) { current = id; location.hash = id; return; }
+    render();
+  }
+  function bindRefs(root) {
+    root.querySelectorAll('[data-go]').forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const it = items.get(b.dataset.go); if (it) go(it.level, b.dataset.go); });
+  }
+
+  function renderLevel(id) {
+    const arriving = shownId !== id;
+    shownId = id;
+    if (arriving) composing = null;
+    if (pendingItem && clauses.get(pendingItem)?.level === id) { cursor[id] = pendingItem; composing = null; }
+    drawLevel();
+    if (arriving && !pendingItem) scrollTo(0, 0);
+    reveal();
+  }
+
   // ---- feature panel
-  async function render() {
-    renderNav();
-    closeComposer();
-    const f = data.features.find(x => x.id === current) || data.features[0];
-    if (!f) { main.innerHTML = '<p class="none">No features in review.json.</p>'; return; }
-    const st = state[f.id] || {};
-    const diagrams = (f.diagrams || []).length
-      ? f.diagrams.map((d, i) => `<figure><div class="diagram"><button class="fs" type="button" title="Full screen" aria-label="Full screen">⛶</button><pre class="mermaid" id="mm-${i}">${esc(d.mermaid)}</pre></div><figcaption>${esc(d.title || '')}</figcaption></figure>`).join('')
-      : `<p class="none">No flow or boundary change, so no diagram.</p>`;
-    const { groups } = reading(f);
+  let noting = null;
+  let renderCount = 0;
+  const featureOf = (id) => data.features.find(x => x.id === id);
+  const shownFiles = (f) => { const { groups, flat } = reading(f); return groups.length > 1 ? flat : f.files || []; };
+  const unitKey = (f, file) => `${data.features.indexOf(f)}:${file ? shownFiles(f).indexOf(file) : 'v'}`;
+  const unitOf = (key) => { const [i, j] = key.split(':'), f = data.features[+i]; return { f, file: j === 'v' ? null : shownFiles(f)[+j] }; };
+  let codeUnits = null;
+  const codeOrder = () => codeUnits ||= data.features.flatMap(f => [...shownFiles(f).map(file => unitKey(f, file)), unitKey(f)]);
+  const unitOpen = (key) => { const { f, file } = unitOf(key); return file ? !isViewed(f, file) : !state[f.id]?.decision; };
+  const unitEl = (key) => key ? main.querySelector(`[data-unit="${key}"]`) : null;
+  const unitInView = (key) => { const box = unitEl(key)?.getBoundingClientRect(); return !!box && box.bottom > 60 && box.top < innerHeight - 110; };
+  const codeAt = () => {
+    const ids = codeOrder();
+    if (!ids.includes(cursor[CODE])) cursor[CODE] = ids.find(unitOpen) || ids[0];
+    return cursor[CODE];
+  };
+  const decideFeature = (f, decision, note = state[f.id]?.note || '') => {
+    Object.assign(entry(f.id), { decision, note, at: Date.now(), head: data.pr.head || 'plan', seen: shot(f) });
+    noting = null; save(); render();
+  };
+  const undecideFeature = (f) => { const e = entry(f.id); delete e.decision; delete e.at; delete e.head; noting = null; save(); render(); };
+  const writeNote = (f, as) => { noting = { id: f.id, as, draft: state[f.id]?.note || '' }; render(); };
+  const saveNote = (f) => {
+    const text = main.querySelector('#d4-note').value.trim();
+    if (noting.as === 'changes') return decideFeature(f, 'changes', text);
+    entry(f.id).note = text; noting = null; save(); render();
+  };
+
+  function featureView(f, doc) {
+    const st = state[f.id] || {}, v = viewedCount(f), ch = sinceOf(f), upd = changedSince(f);
+    const { groups, flat } = reading(f);
+    const block = (file) => fileBlock(f, file, doc && unitKey(f, file), doc?.cur);
     const files = groups.length > 1
-      ? groups.map(g => `<div class="fgroup">${esc(g.label)}<span>${g.files.length}</span></div>${g.files.map(file => fileBlock(f, file)).join('')}`).join('')
-      : (f.files || []).map(file => fileBlock(f, file)).join('');
-    const dis = submitted ? 'disabled' : '';
-    const v = viewedCount(f);
-    const ch = sinceOf(f), upd = changedSince(f);
+      ? groups.map(g => `<div class="fgroup">${esc(g.label)}<span>${g.files.length}</span></div>${g.files.map(block).join('')}`).join('')
+      : (f.files || []).map(block).join('');
     const when = ch.at ? new Date(ch.at).toLocaleString() : '';
+    const told = (k) => k in ch.text && !(LAYERED && k === 'scenario');
     const bits = [
-      ...['scenario', 'description', 'tested'].filter(k => k in ch.text).map(k => ({ scenario: 'the scenario', description: 'what changed', tested: 'how it was tested' })[k]),
-      ...(ch.diagrams ? ['the diagrams'] : []),
+      ...['scenario', 'description', 'tested'].filter(told).map(k => ({ scenario: 'the scenario', description: 'what changed', tested: 'how it was tested' })[k]),
+      ...(ch.diagrams && !LAYERED ? ['the diagrams'] : []),
       ...(ch.entities.size ? [`${ch.entities.size} entit${ch.entities.size === 1 ? 'y' : 'ies'}`] : []),
       ...(upd.length ? [`${upd.length} reworked file${upd.length === 1 ? '' : 's'}`] : []),
       ...(ch.newFiles?.length ? [`${ch.newFiles.length} file${ch.newFiles.length === 1 ? '' : 's'} not there before`] : []),
     ];
-    const bar = ch.any ? `<div class="since">
-      <span class="what"><b>Reworked since you looked${when ? ` on ${esc(when)}` : ''}:</b> ${esc(bits.join(', '))}</span>
-      <label class="hl"><input type="checkbox" ${showDiff ? 'checked' : ''}>Show before and after</label>
-      <button class="seen" type="button" title="Take everything on this page as your new starting point">Mark as seen</button>
+    const reworded = ['scenario', 'description', 'tested'].some(told);
+    const bar = ch.any && bits.length ? `<div class="since">
+      <span class="what"><b>Reworked since you looked${when ? ` on ${esc(when)}` : ''}:</b> ${esc(bits.join(', '))}.</span>
+      <span class="ctl">${reworded ? `<label class="hl"><input type="checkbox" ${showDiff ? 'checked' : ''}>Show what it said before</label>` : ''}<button class="seen" type="button" title="Take everything ${doc ? 'in this feature' : 'on this page'} as your new starting point">Mark as seen</button></span>
     </div>` : '';
+    const blocks = (html) => { const t = document.createElement('template'); t.innerHTML = html; return [...t.content.children]; };
+    const plain = (el) => el.textContent.replace(/\s+/g, ' ').trim();
     // What a reworked passage said beside what it says, each rendered as the page renders it. A word-level
     // diff of a rewrite interleaves two texts into one that reads as neither.
-    const sideBySide = (k, before, nowHtml) => `<div class="sbs">`
-      + `<div class="was"><div class="lbl">When you looked</div>${(k === 'scenario' ? esc(before) : md(before)) || '<p class="none">Empty.</p>'}</div>`
-      + `<div class="now"><div class="lbl">Now</div>${nowHtml}</div></div>`;
-    const prose = (k, html) => showDiff && k in ch.text ? sideBySide(k, ch.text[k], html) : html;
-    const chip = (k) => k in ch.text || (k === 'diagrams' && ch.diagrams) ? `<span class="sub upd">updated</span>` : '';
-    const decidedAt = !st.decision ? 'No decision yet'
-      : `Decided ${new Date(st.at).toLocaleString()}${st.head === 'plan' && !PLAN ? ' on the plan' : st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}${upd.length ? `. <b>${upd.length} file${upd.length === 1 ? '' : 's'} changed since</b>, decide again.` : ''}`;
-
-    main.innerHTML = `
-      <h2>${esc(f.title)}</h2>
-      ${bar}
-      <div class="section"><h3>User scenario${chip('scenario')}</h3><div class="scenario commentable" data-section="scenario">${prose('scenario', esc(f.scenario || ''))}</div></div>
-      <div class="section"><h3>What changed${chip('description')}</h3><div class="prose commentable" data-section="description">${prose('description', md(f.description))}</div></div>
-      <div class="section"><h3>Entities</h3>${entities(f)}</div>
-      <div class="section"><h3>Architecture${chip('diagrams')}</h3>${diagrams}</div>
-      <div class="section"><h3>Before / after</h3>${shots(f.screenshots)}</div>
-      <div class="section"><h3>${PLAN ? 'Files' : 'Diff'}${v.total ? `<span class="sub ${v.seen === v.total ? 'all' : ''}">${v.seen} of ${v.total} viewed</span>` : ''}${v.total ? `<button class="focusbtn" type="button">Focus review ⛶</button>` : ''}</h3>${files || `<p class="none">${PLAN ? 'Not written yet. The plan above is what you are approving.' : 'No files listed.'}</p>`}</div>
-      <div class="section"><h3>How it ${PLAN ? 'will be' : 'was'} tested${chip('tested')}</h3><div class="prose commentable" data-section="tested">${prose('tested', md(f.tested) || '<p class="none">Not stated.</p>')}</div></div>
-      <div class="section"><h3>Comments</h3>${commentList(f)}</div>
-      <div class="decide">
-        <div class="row">
-          <button class="approve ${st.decision === 'approved' ? 'on' : ''}" ${dis}>${PLAN ? 'Approve plan' : 'Approve'}</button>
-          <button class="changes ${st.decision === 'changes' ? 'on' : ''}" ${dis}>Request changes</button>
-          <span class="state">${decidedAt}</span>
-        </div>
-        <textarea placeholder="${PLAN ? 'What the plan should do differently (optional)' : 'Note for the author (optional)'}" ${dis}>${esc(st.note || '')}</textarea>
-      </div>`;
-
-    const decide = (decision) => {
-      Object.assign(entry(f.id), { decision, note: main.querySelector('.decide textarea').value, at: Date.now(), head: data.pr.head || 'plan', seen: shot(f) });
-      save(); render();
+    const reworked = (k, html) => {
+      if (!(k in ch.text)) return { body: html, mark: '', note: '' };
+      if (!showDiff) return { body: html, mark: '', note: '<p class="call">Reworded since you looked.</p>' };
+      const before = ch.text[k] || '', said = '<p class="call">Reworded since you looked. It said:</p>';
+      if (k === 'scenario') return { body: html, mark: ' moved', note: `${said}<div class="d4-was"><p>${before ? inl(before) : 'Nothing.'}</p></div>` };
+      const was = blocks(md(before)), now = blocks(html), old = new Set(was.map(plain)), cur = new Set(now.map(plain));
+      now.forEach(el => { if (!old.has(plain(el))) el.classList.add('moved'); });
+      const gone = was.filter(el => !cur.has(plain(el)));
+      return { body: now.map(el => el.outerHTML).join('\n'), mark: '',
+        note: gone.length ? `${said}<div class="d4-was">${gone.map(el => el.outerHTML).join('\n')}</div>` : '<p class="call">Added since you looked. The new passages are marked.</p>' };
     };
-    main.querySelector('.approve').onclick = () => decide('approved');
-    main.querySelector('.changes').onclick = () => decide('changes');
-    main.querySelector('.decide textarea').onblur = (e) => { if (state[f.id]) { state[f.id].note = e.target.value; save(); } };
+    const row = (cls, k, html) => { const r = reworked(k, html); return `<div class="d4-row"><div class="${cls}${r.mark} commentable" data-section="${k}">${r.body}</div><div class="d4-note">${r.note}</div></div>`; };
+    const d = st.decision === 'approved' ? 'ok' : st.decision === 'changes' ? 'change' : '', writing = noting?.id === f.id;
+    const claim = PLAN ? 'This part of the plan is ready to build.' : LAYERED ? 'The code of this feature is ready to merge.' : 'This feature is ready to merge.';
+    const noted = d === 'change' ? `<p class="d4-asked"><b>Changes requested.</b> ${esc(st.note || '')}</p>` : st.note ? `<p class="d4-said"><b>Your note.</b> ${esc(st.note)}</p>` : '';
+    const tools = submitted ? '' : writing
+      ? `<div class="d4-compose"><textarea id="d4-note" rows="2" placeholder="${PLAN ? 'What the plan should do differently' : 'Note for the author'} (optional)">${esc(noting.draft)}</textarea>
+          <div class="row"><button type="button" class="d4-btn ${noting.as === 'changes' ? 'bad' : ''}" data-say="save">${noting.as !== 'changes' ? 'Save the note' : LAYERED ? 'Request the change' : 'Request changes'} <kbd>${MOD}↵</kbd></button><button type="button" class="d4-btn ghost" data-say="cancel">Cancel <kbd>Esc</kbd></button></div></div>`
+      : `<span class="d4-acts"><button type="button" data-say="changes">${d === 'change' ? 'Edit the request' : LAYERED ? 'Request a change' : 'Request changes'}</button>${d === 'change' ? '' : `<button type="button" data-say="note">${st.note ? 'Edit the note' : 'Add a note'}</button>`}${d ? '<button type="button" data-say="undo">Undo</button>' : ''}</span>`;
+    const says = d === 'ok' ? 'Approved. Undo' : d === 'change' ? 'Changes requested. Edit the request' : PLAN ? 'Approve this part of the plan' : 'Approve this feature';
+    const decided = st.decision ? `Decided ${new Date(st.at).toLocaleString()}${st.head === 'plan' && !PLAN ? ' on the plan' : st.head && st.head !== data.pr.head ? ` at ${st.head.slice(0, 7)}` : ''}.` : '';
+    const unit = doc ? unitKey(f) : '';
+    const verdict = `<div class="d4-cl verdict ${d}${unit && unit === doc.cur ? ' cur' : ''}"${unit ? ` data-unit="${unit}"` : ''}>
+      <div class="d4-mg"><button type="button" class="d4-sign" aria-pressed="${d === 'ok'}" aria-label="${says}" title="${says}" ${submitted ? 'disabled' : ''}>${d === 'ok' ? '✓' : d === 'change' ? '✕' : ''}</button></div>
+      <div class="d4-main"><span class="d4-tx">${claim}</span>${noted}${tools}</div>
+      <div class="d4-note">${st.decision && upd.length ? `<p class="call"><b>${plural(upd.length, 'file')} changed since you decided.</b> Decide again.</p>` : ''}${decided ? `<p>${decided}</p>` : ''}</div>
+    </div>`;
+    return { v, ch, flat, files, bar, row, told, verdict };
+  }
 
-    main.querySelectorAll('.file > .fh').forEach(h => h.onclick = () => {
+  function bindFeature(root, f) {
+    const st = state[f.id] || {}, inDoc = root !== main;
+    const say = { changes: () => writeNote(f, 'changes'), note: () => writeNote(f, 'note'), undo: () => undecideFeature(f), save: () => saveNote(f), cancel: () => { noting = null; render(); } };
+    root.querySelector('.verdict .d4-sign').onclick = () => {
+      if (inDoc) cursor[CODE] = !st.decision && codeAfter(unitKey(f)) || unitKey(f);
+      return !st.decision ? decideFeature(f, 'approved') : st.decision === 'approved' ? undecideFeature(f) : writeNote(f, 'changes');
+    };
+    root.querySelectorAll('[data-say]').forEach(b => b.onclick = say[b.dataset.say]);
+    const note = root.querySelector('#d4-note');
+    if (note) {
+      note.oninput = () => { noting.draft = note.value; };
+      note.onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveNote(f); } };
+      note.focus({ preventScroll: true });
+      note.setSelectionRange(note.value.length, note.value.length);
+    }
+    root.querySelectorAll('.file > .fh').forEach(h => h.onclick = () => {
       const file = f.files.find(x => x.path === h.parentElement.dataset.path);
       (expanded[f.id] ||= new Map()).set(file.path, !isOpen(f, file)); render();
     });
-    const hl = main.querySelector('.since .hl input');
+    root.querySelectorAll('.file .fv').forEach(b => b.onclick = (e) => {
+      e.stopPropagation();
+      const file = f.files.find(x => x.path === b.closest('.file').dataset.path);
+      if (inDoc) cursor[CODE] = !isViewed(f, file) && codeAfter(unitKey(f, file)) || unitKey(f, file);
+      toggleViewed(f, file);
+    });
+    if (LAYERED) root.querySelectorAll('.file .also a').forEach(a => a.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      goCode(a.getAttribute('href').slice(1), a.closest('.file').dataset.path);
+    });
+    const hl = root.querySelector('.since .hl input');
     if (hl) hl.onchange = () => { showDiff = hl.checked; render(); };
-    const seenBtn = main.querySelector('.since .seen');
+    const seenBtn = root.querySelector('.since .seen');
     if (seenBtn) seenBtn.onclick = () => { entry(f.id).seen = shot(f); save(); render(); };
-    main.querySelector('.focusbtn') && (main.querySelector('.focusbtn').onclick = () => openFocus(f));
-    main.querySelectorAll('.file .viewed input').forEach(cb => cb.onchange = () => toggleViewed(f, f.files.find(x => x.path === cb.closest('.file').dataset.path), cb.checked));
-    main.querySelectorAll('.dl').forEach(row => row.onclick = () => { if (!submitted) openLineComposer(f, row); });
-    bindRendered(main, f, render);
-    main.querySelectorAll('[data-del]').forEach(b => b.onclick = (e) => {
+    root.querySelectorAll('.focusbtn, [data-focus]').forEach(b => b.onclick = () => openFocus(f));
+    root.querySelectorAll('.dl').forEach(line => line.onclick = () => { if (!submitted) openLineComposer(f, line); });
+    bindRendered(root, f, render);
+    root.querySelectorAll('[data-del]').forEach(b => b.onclick = (e) => {
       e.stopPropagation(); const cs = entry(f.id).comments; cs.splice(cs.findIndex(c => c.id === b.dataset.del), 1); save(); render();
     });
-
-    main.querySelectorAll('.examples .tabs button').forEach(b => b.onclick = () => {
+    root.querySelectorAll('.examples .tabs button').forEach(b => b.onclick = () => {
       const box = b.closest('.examples');
+      exampleShown.set(`${f.id}\n${box.dataset.entity}`, +b.dataset.ex);
       box.querySelectorAll('.tabs button').forEach(t => t.classList.toggle('on', t === b));
       box.querySelectorAll('.ex').forEach(x => x.hidden = x.dataset.ex !== b.dataset.ex);
-      editors.forEach(ed => ed.layout());
+      editors.forEach(kept => kept.ed.layout());
     });
-    highlight(f);
-    markPhrases(main, f);
-    monacoReady.then(() => { if (data.features.find(x => x.id === current) === f) mountEditors(f); });
-    if ((f.diagrams || []).length) {
-      try { await mermaid.run({ nodes: main.querySelectorAll('pre.mermaid') }); }
-      catch (e) { main.querySelectorAll('pre.mermaid').forEach(p => p.insertAdjacentHTML('afterend', `<p class="none">Diagram failed to render: ${esc(e.message)}</p>`)); }
+    highlight(f, root);
+    markPhrases(root, f);
+    bindRefs(root);
+  }
+
+  function featureSection(f, i, cur) {
+    const w = featureView(f, { cur }), rules = f.rules || [], cases = f.behaviours || [];
+    const behind = [rules.length ? dref(f.id, plural(rules.length, 'rule'), true) : '', cases.length ? dref(cases[0].id, plural(cases.length, 'behaviour'), true) : ''].filter(Boolean);
+    const sub = [
+      behind.length ? `Behind ${behind.join(' and ')}.` : '',
+      w.v.total ? `<span class="${w.v.seen === w.v.total ? 'all' : ''}">${w.v.seen} of ${plural(w.v.total, 'file')} viewed.</span>${w.flat.length ? ' <button type="button" class="focusbtn">Focus review</button>' : ''}` : '',
+    ].filter(Boolean).join(' ');
+    return `<section class="d4-s d4-feat" data-feature="${esc(f.id)}">
+      <h2>${i + 1}. ${esc(f.title)}</h2>
+      ${w.bar}
+      ${sub ? `<p class="d4-sub">${sub}</p>` : ''}
+      ${w.row('d4-prose', 'description', md(f.description))}
+      ${(f.entities || []).length ? `<h3>Entities</h3>${entities(f)}` : ''}
+      ${w.files ? `<div class="d4-files">${w.files}</div>` : ''}
+      ${f.tested || w.told('tested') ? `<h3>How it ${PLAN ? 'will be' : 'was'} tested</h3>${w.row('d4-prose', 'tested', md(f.tested) || '<p class="none">Not stated.</p>')}` : ''}
+      ${entry(f.id).comments.length ? `<div class="d4-comments"><h2>Comments</h2>${commentList(f)}</div>` : ''}
+      ${w.verdict}
+    </section>`;
+  }
+  function codeClosing() {
+    if (codeOrder().some(unitOpen)) return '';
+    const asks = data.features.filter(f => state[f.id]?.decision === 'changes'), ok = data.features.length - asks.length;
+    const rest = LEVELS.filter(l => tallyOf(l.id).open);
+    const onward = rest.length ? `<p>Still to read: ${rest.map(l => `<a href="#${l.id}" target="_self">${l.name}</a>`).join(', ')}.</p>`
+      : SERVED && !submitted ? `<button type="button" class="d4-btn go" data-act="submit">Submit the review</button>`
+      : '';
+    return `<section class="d4-closing ${asks.length ? 'has' : 'clean'}" id="closing">
+      <h3>The ${codeName.toLowerCase()} is read: ${ok} signed${asks.length ? `, ${plural(asks.length, 'change')} requested` : ''}.</h3>
+      ${asks.length ? `<ul>${asks.map(f => `<li><b>${esc(f.title)}</b>${esc(state[f.id].note || '')}</li>`).join('')}</ul>` : ''}
+      ${onward}
+    </section>`;
+  }
+  function codeHtml() {
+    const cur = codeAt(), fs = data.features, counts = fs.map(viewedCount), part = PLAN ? 'part' : 'feature';
+    const total = counts.reduce((n, v) => n + v.total, 0), seen = counts.reduce((n, v) => n + v.seen, 0);
+    const unsigned = fs.filter(f => !state[f.id]?.decision).length;
+    const legend = `${submitted ? '' : `<p>Select any text to comment on it${total ? ', or click a line of the diff' : ''}.</p>`}
+      <p>Reading this is optional: the review is decided on the levels. A change requested here still sends it back.</p>`;
+    const keys = submitted ? '' : `<ul class="d4-keys"><li><kbd>↵</kbd>tick and go on</li><li><kbd>C</kbd>comment on the file</li><li><kbd>X</kbd>request a change</li><li><kbd>U</kbd>undo</li><li><kbd>J</kbd><kbd>K</kbd>move down, up</li><li><kbd>N</kbd>next unread</li><li><kbd>F</kbd>other typeface</li></ul>`;
+    const bar = submitted || !codeOrder().some(unitOpen) ? '' : `<div class="d4-bar"><button type="button" class="d4-btn" data-act="next">${seen < total ? 'Next unread' : 'Next unsigned'} <kbd>N</kbd></button><span>${seen < total ? `${total - seen} of ${total} files left` : `${plural(unsigned, part)} left to sign`}</span></div>`;
+    return `<div class="d4w"><article class="d4 d4-code d4-all">
+      <header class="d4-h"><p class="d4-lv">${codeName}</p><h1>${PLAN ? 'How it will be built' : 'What was written'}</h1><p class="d4-ask">${PLAN ? 'Is this how it should be built?' : 'Does the code do what the levels say?'}</p></header>
+      <div class="d4-front"><div class="d4-legend">${legend}</div>${keys}</div>
+      ${fs.map((f, i) => featureSection(f, i, cur)).join('')}
+      ${codeClosing()}
+    </article>${bar}</div>`;
+  }
+
+  let codeShow = null;
+  const sectionOf = (id) => [...main.querySelectorAll('.d4-feat')].find(x => x.dataset.feature === id);
+  const keepSpot = () => {
+    const el = [...main.querySelectorAll('[data-unit], .d4-feat > h2')].find(x => x.getBoundingClientRect().bottom > 0);
+    if (!el) return () => {};
+    const top = el.getBoundingClientRect().top, unit = el.dataset.unit, id = el.closest('.d4-feat').dataset.feature;
+    return () => {
+      const now = unit ? unitEl(unit) : sectionOf(id)?.querySelector('h2');
+      if (now) scrollBy(0, now.getBoundingClientRect().top - top);
+    };
+  };
+  const showUnit = (key) => { const el = unitEl(key); el?.scrollIntoView({ block: el.querySelector('.fbody') ? 'start' : 'center' }); };
+  function markCursor(key) {
+    cursor[CODE] = key;
+    main.querySelectorAll('[data-unit].cur').forEach(el => el.classList.remove('cur'));
+    unitEl(key)?.classList.add('cur');
+  }
+  function renderCode(turn) {
+    const arriving = shownId !== CODE, want = pendingCode, show = codeShow;
+    pendingCode = null; codeShow = null;
+    shownId = CODE;
+    pop.hidden = true;
+    const target = want && featureOf(want.id), sought = target && want.path ? (target.files || []).find(x => x.path === want.path) : null;
+    if (sought) { (expanded[target.id] ||= new Map()).set(sought.path, true); cursor[CODE] = unitKey(target, sought); }
+    const settle = arriving || target || show ? null : keepSpot();
+    main.innerHTML = codeHtml();
+    main.querySelector('.d4w').onclick = codeClick;
+    main.querySelectorAll('.d4-feat').forEach(sec => bindFeature(sec, featureOf(sec.dataset.feature)));
+    const place = () => {
+      if (target) {
+        const el = sought ? unitEl(unitKey(target, sought)) : null;
+        const line = el && want.find && [...el.querySelectorAll('.dl:not(.del) .code')].find(c => c.textContent.includes(want.find))?.parentElement;
+        line?.classList.add('found');
+        (line || el || sectionOf(target.id))?.scrollIntoView({ block: line ? 'center' : 'start' });
+      } else if (show === 'closing') main.querySelector('#closing')?.scrollIntoView({ block: 'center' });
+      else if (show) showUnit(show);
+      else if (arriving) scrollTo(0, 0);
+      else settle();
+      return scrollY;
+    };
+    const mount = () => mountEditors(data.features.map(f => [f, sectionOf(f.id)]).filter(([, sec]) => sec));
+    mount();
+    const placed = place();
+    if (!monacoApi) monacoReady.then(() => {
+      if (turn !== renderCount) return;
+      mount();
+      if (target && Math.abs(scrollY - placed) < 2) place();
+    });
+  }
+  function arrive(key) {
+    const { f, file } = unitOf(key);
+    cursor[CODE] = key; codeShow = key;
+    if (!file || isViewed(f, file) || !file.hunks?.length || isOpen(f, file)) return false;
+    (expanded[f.id] ||= new Map()).set(file.path, true);
+    return true;
+  }
+  function codePick(key) {
+    if (arrive(key)) return render();
+    codeShow = null;
+    markCursor(key); showUnit(key);
+  }
+  function codeMove(step) {
+    const ids = codeOrder(), i = ids.indexOf(codeAt());
+    codePick(ids[Math.max(0, Math.min(ids.length - 1, i + step))]);
+  }
+  function codeNext() {
+    const ids = codeOrder(), key = codeAt();
+    const next = unitOpen(key) && !unitInView(key) ? key : ids.slice(ids.indexOf(key) + 1).find(unitOpen) || ids.find(unitOpen);
+    if (next) codePick(next);
+  }
+  const codeAfter = (key) => { const ids = codeOrder(); return ids.slice(ids.indexOf(key) + 1).find(unitOpen) || ids.find(x => x !== key && unitOpen(x)); };
+  function codeDone(key) {
+    const { f, file } = unitOf(key), next = codeAfter(key);
+    if (next) arrive(next); else codeShow = 'closing';
+    if (file) toggleViewed(f, file, true); else decideFeature(f, 'approved');
+  }
+  function codeUndo(key) {
+    const { f, file } = unitOf(key);
+    if (!file) { if (state[f.id]?.decision) undecideFeature(f); }
+    else if (isViewed(f, file)) toggleViewed(f, file, false);
+  }
+  function codeSay(key, as) {
+    const { f, file } = unitOf(key);
+    if (!file || as === 'changes') { cursor[CODE] = codeShow = unitKey(f); return writeNote(f, as); }
+    const c = makeComposer('', (body) => { entry(f.id).comments.push({ id: uid(), kind: 'file', file: file.path, body, at: Date.now() }); save(); render(); });
+    unitEl(key).querySelector('.fh').insertAdjacentElement('afterend', c);
+    c.querySelector('textarea').focus();
+  }
+  function codeClick(e) {
+    const b = e.target.closest('[data-act]');
+    if (b?.dataset.act === 'next') { b.blur(); return codeNext(); }
+    if (b?.dataset.act === 'submit') return document.getElementById('submit').click();
+    if (e.target.closest('.d4-sign')) return;
+    const unit = e.target.closest('[data-unit]')?.dataset.unit;
+    if (unit && unit !== cursor[CODE] && !String(getSelection())) markCursor(unit);
+  }
+  function codeKey(e) {
+    const t = e.target;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || e.metaKey || e.ctrlKey || e.altKey) return false;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, key = codeAt();
+    if (k === 'Enter' && t.closest?.('button, a, summary')) return false;
+    if (k === 'j') codeMove(1);
+    else if (k === 'k') codeMove(-1);
+    else if (k === 'n') codeNext();
+    else if (k === 'f') toggleFace();
+    else if (!['Enter', 'x', 'c', 'u'].includes(k) || submitted) return false;
+    else if (!unitInView(key)) codePick(key);
+    else if (k === 'Enter') unitOpen(key) ? codeDone(key) : codeNext();
+    else if (k === 'u') codeUndo(key);
+    else codeSay(key, k === 'x' ? 'changes' : 'note');
+    e.preventDefault();
+    return true;
+  }
+
+  function render() {
+    const turn = ++renderCount;
+    if (LAYERED) {
+      const f = featureOf(current);
+      if (f) { pendingCode ||= { id: f.id }; current = CODE; history.replaceState(null, '', `#${CODE}`); }
+      if (!LEVELS.some(l => l.id === current) && !(current === CODE && data.features.length)) current = LEVELS[0].id;
     }
-      main.querySelectorAll('.diagram .fs').forEach(b => b.onclick = () => openZoom(b.parentElement));
+    if (noting && noting.id !== current && current !== CODE) noting = null;
+    renderNav();
+    closeComposer();
+    if (LAYERED && current === CODE) return renderCode(turn);
+    if (LAYERED) return renderLevel(current);
+    const f = featureOf(current) || data.features[0];
+    if (!f) { main.innerHTML = '<p class="none">No features in review.json.</p>'; return; }
+    if (shownId !== f.id) scrollTo(0, 0);
+    shownId = f.id;
+    const w = featureView(f, null), nth = data.features.indexOf(f), total = data.features.length;
+    const section = (title, body, sub = '') => `<section class="d4-s"><h2>${title}</h2>${sub}${body}</section>`;
+    const legend = submitted ? '' : `<p>Select any text to comment on it${w.flat.some(x => x.hunks?.length) ? ', or click a line of the diff' : ''}.</p>`;
+    const sub = w.v.total ? `<p class="d4-sub"><span class="${w.v.seen === w.v.total ? 'all' : ''}">${w.v.seen} of ${w.v.total} viewed.</span> Tick a file when you have read it.${w.flat.length ? ' <button type="button" class="focusbtn">Focus review</button> shows one file at a time.' : ''}</p>` : '';
+    const foot = submitted || !w.v.total || !w.flat.length ? '' : `<div class="d4-bar">${w.v.seen < w.v.total
+      ? `<button type="button" class="d4-btn" data-focus>Read the next unviewed file</button><span>${w.v.total - w.v.seen} of ${w.v.total} left</span>`
+      : '<span class="done">Every file is viewed.</span>'}</div>`;
+
+    main.innerHTML = `<div class="d4w"><article class="d4 d4-code" data-feature="${esc(f.id)}">
+      <header class="d4-h"><p class="d4-lv">${PLAN ? 'Plan, part' : 'Feature'} ${nth + 1} of ${total}</p><h1>${esc(f.title)}</h1><p class="d4-ask">${PLAN ? 'Is this the right thing to build, before any code is written?' : 'Is this the right change, built the right way?'}</p></header>
+      ${w.bar}
+      ${legend ? `<div class="d4-front"><div class="d4-legend">${legend}</div></div>` : ''}
+      ${section('User scenario', w.row('d4-statement', 'scenario', inl(f.scenario || '')))}
+      ${section('What changed', w.row('d4-prose', 'description', md(f.description)))}
+      ${section('Entities', entities(f))}
+      ${section('Architecture', (f.diagrams || []).length ? `<div class="d4-wide">${f.diagrams.map(figure).join('')}</div>` : '<p class="d4-none">No flow or boundary change, so no diagram.</p>', w.ch.diagrams ? '<p class="d4-sub call">Redrawn since you looked.</p>' : '')}
+      ${section('Before and after', f.screenshots ? `<div class="d4-wide">${shots(f.screenshots)}</div>` : '<p class="d4-none">No user-visible surface, so no screenshots.</p>')}
+      ${section(PLAN ? 'Files' : 'Diff', w.files || `<p class="d4-none">${PLAN ? 'Not written yet. The plan above is what you are approving.' : 'No files listed.'}</p>`, sub)}
+      ${section(`How it ${PLAN ? 'will be' : 'was'} tested`, w.row('d4-prose', 'tested', md(f.tested) || '<p class="none">Not stated.</p>'))}
+      ${entry(f.id).comments.length ? `<section class="d4-comments"><h2>Comments</h2>${commentList(f)}</section>` : ''}
+      ${section('Your decision', w.verdict)}
+    </article>${foot}</div>`;
+    bindFeature(main, f);
+    drawFigures();
+    monacoReady.then(() => { if (turn === renderCount) mountEditors([[f, main]]); });
   }
 
   // ---- full-screen diagram
   const zoom = document.getElementById('zoom');
   function openZoom(box) {
-    const svg = box.querySelector('svg');
-    if (!svg) return;
-    zoom.querySelector('.body').replaceChildren(svg.cloneNode(true));
-    zoom.querySelector('.cap').textContent = box.parentElement.querySelector('figcaption')?.textContent || '';
+    const shot = box.matches('img'), art = shot ? box : box.querySelector('svg');
+    if (!art) return;
+    zoom.querySelector('.body').replaceChildren(art.cloneNode(true));
+    const said = shot ? box.parentElement.querySelector('.label') || box.closest('.shots').nextElementSibling : box.parentElement.querySelector('figcaption');
+    zoom.querySelector('.cap').textContent = said?.matches('.label, figcaption') ? said.textContent : '';
     zoom.hidden = false;
     document.body.classList.add('zoomed');
     zoom.querySelector('.close').focus();
@@ -914,25 +1755,31 @@
   }
   zoom.querySelector('.close').onclick = closeZoom;
   zoom.onclick = (e) => { if (e.target === zoom) closeZoom(); };
+  main.addEventListener('click', (e) => { const box = e.target.closest('.diagram:not(.pending), .shots img'); if (box) openZoom(box); });
 
   // ---- reading order: what a reviewer should meet first. The domain types a feature declares come
   // first (they name everything downstream), then what stores them, then the logic, the edges it is
   // reached through, the surface, and last the tests and generated files that only confirm the rest.
   /** The feature's files, grouped and flattened into the order the rail and the arrows follow. */
+  const readings = new WeakMap();
   function reading(f) {
+    if (readings.has(f)) return readings.get(f);
     const files = f.files || [];
     const groups = (data.groups || []).map(([key, label]) => ({ key, label, files: files.filter(x => (x.group || 'other') === key) })).filter(g => g.files.length);
-    return { groups, flat: groups.flatMap(g => g.files) };
+    readings.set(f, { groups, flat: groups.flatMap(g => g.files) });
+    return readings.get(f);
   }
 
   // ---- focus review: one file at a time, full screen, in that order
   const focus = document.getElementById('focus');
-  let focusAt = -1;                                 // index into reading(current).flat, -1 when closed
+  let focusFeature = null;
+  let focusAt = -1;                                 // index into reading(focusFeature).flat, -1 when closed
   let focusShown = null;                            // the file the panel last drew, so a redraw of it keeps its scroll
   const focusOpen = () => focusAt >= 0;
   function openFocus(f, index) {
     const { flat } = reading(f);
     if (!flat.length) return;
+    focusFeature = f;
     const firstUnseen = flat.findIndex(x => !isViewed(f, x));
     focusAt = index ?? (firstUnseen < 0 ? 0 : firstUnseen);
     focus.hidden = false;
@@ -946,7 +1793,7 @@
     render();
   }
   function goFocus(step) {
-    const f = data.features.find(x => x.id === current);
+    const f = focusFeature;
     const { flat } = reading(f);
     const next = focusAt + step;
     if (next < 0 || next >= flat.length) return closeFocus();   // off either end: back to the feature
@@ -954,29 +1801,32 @@
   }
   function renderFocus() {
     if (!focusOpen()) return;
-    const f = data.features.find(x => x.id === current);
+    const f = focusFeature;
     const { groups, flat } = reading(f);
     const file = flat[focusAt];
     if (!file) return closeFocus();
     const seen = flat.filter(x => isViewed(f, x)).length;
     focus.querySelector('.rtitle').textContent = f.title;
-    focus.querySelector('.rcount').textContent = `${seen}/${flat.length} viewed`;
+    focus.querySelector('.rcount').textContent = `${seen} of ${flat.length} viewed`;
     focus.querySelector('.progress span').style.width = `${Math.round((seen / flat.length) * 100)}%`;
     focus.querySelector('.pos').textContent = `${focusAt + 1} of ${flat.length}`;
-    focus.querySelector('.path').textContent = file.path;
+    focus.querySelector('.path').innerHTML = pathHtml(file.path);
+    focus.querySelector('.path').title = file.path;
     const fch = sinceOf(f).files[file.path];
     focus.querySelector('.newly').textContent = fch ? (fch.added != null ? `${fch.added} new line${fch.added === 1 ? '' : 's'} since you looked` : 'reworked since you looked') : '';
     focus.querySelector('.newly').hidden = !fch;
-    focus.querySelector('.good').textContent = isViewed(f, file) ? 'Viewed ✓' : 'Looks good ✓';
+    focus.querySelector('.good').innerHTML = `${isViewed(f, file) ? 'Viewed ✓' : 'Mark as viewed'} <kbd>↵</kbd>`;
+    focus.querySelector('.good').hidden = submitted;
+    focus.querySelector('.say').hidden = submitted;
     focus.querySelector('.good').classList.toggle('on', isViewed(f, file));
 
     const rail = focus.querySelector('.rlist');
     rail.innerHTML = groups.map(g => `<div class="rgroup"><div class="glabel">${esc(g.label)}</div>${g.files.map(x => {
-      const i = flat.indexOf(x), dir = x.path.slice(0, x.path.lastIndexOf('/') + 1), name = x.path.slice(dir.length);
+      const i = flat.indexOf(x);
       const n = entry(f.id).comments.filter(c => (c.kind === 'line' || c.kind === 'file') && c.file === x.path).length;
       const ch = sinceOf(f).files[x.path];
       return `<button data-i="${i}" class="${i === focusAt ? 'on' : ''} ${isViewed(f, x) ? 'seen' : ''}">
-        <span class="tick">${isViewed(f, x) ? '✓' : ''}</span><span class="nm"><span class="dir">${esc(dir)}</span>${esc(name)}</span>${ch ? `<span class="u" title="${ch.added != null ? `${ch.added} new lines` : 'reworked'}">●</span>` : ''}${n ? `<span class="c">${n} ✎</span>` : ''}</button>`;
+        <span class="nb ${isViewed(f, x) ? 'ok' : ''}">${isViewed(f, x) ? '✓' : ''}</span><span class="nm">${pathHtml(x.path)}${ch || n ? `<span class="rm">${ch ? `<span class="u">${ch.added != null ? plural(ch.added, 'new line') : 'reworked'}</span>` : ''}${n ? `<span>${plural(n, 'comment')}</span>` : ''}</span>` : ''}</span></button>`;
     }).join('')}</div>`).join('');
     rail.querySelectorAll('button').forEach(b => b.onclick = () => { focusAt = Number(b.dataset.i); renderFocus(); });
     rail.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });
@@ -986,8 +1836,8 @@
     // Source) keeps the reader's place, now that the panel scrolls.
     const shown = `${f.id}\n${file.path}`, keep = focusShown === shown ? code.scrollTop : 0;
     const cs = entry(f.id).comments.filter(c => c.kind === 'file' && c.file === file.path);
-    code.innerHTML = `${cs.map(c => `<div class="lc"><div class="who">file comment<button data-del="${c.id}">delete</button></div>${esc(c.body)}</div>`).join('')}
-      <div class="file" data-path="${esc(file.path)}">${fileBody(f, file)}</div>`;
+    code.innerHTML = `${cs.map(c => `<div class="lc"><div class="who">file comment${delBtn(c)}</div>${esc(c.body)}</div>`).join('')}
+      <div class="file" data-path="${esc(file.path)}"><div class="fbody">${fileBody(f, file)}</div></div>`;
     code.scrollTop = keep;
     focusShown = shown;
     markPhrases(code, f);
@@ -999,14 +1849,14 @@
     });
   }
   function markGood() {
-    const f = data.features.find(x => x.id === current);
+    const f = focusFeature;
     const file = reading(f).flat[focusAt];
     if (!file || submitted) return;
     if (!isViewed(f, file)) toggleViewed(f, file);
     goFocus(1);
   }
   function fileComposer() {
-    const f = data.features.find(x => x.id === current);
+    const f = focusFeature;
     const file = reading(f).flat[focusAt];
     if (!file || submitted) return;
     const c = makeComposer(file.path, (body) => {
@@ -1038,9 +1888,11 @@
     closeComposer();
     composer = document.createElement('div');
     composer.className = `composer ${cls}`;
-    composer.innerHTML = `${quote ? `<div class="q">${esc(quote)}</div>` : ''}<textarea placeholder="Comment"></textarea><div class="row"><button class="save">Save</button><button class="cancel">Cancel</button></div>`;
+    composer.innerHTML = `${quote ? `<div class="q">${esc(quote)}</div>` : ''}<textarea placeholder="Comment for the author"></textarea><div class="row"><button type="button" class="save">Save <kbd>${MOD}↵</kbd></button><button type="button" class="cancel">Cancel <kbd>Esc</kbd></button></div>`;
+    const keep = () => { const body = composer.querySelector('textarea').value.trim(); if (body) onSave(body); closeComposer(); };
     composer.querySelector('.cancel').onclick = closeComposer;
-    composer.querySelector('.save').onclick = () => { const body = composer.querySelector('textarea').value.trim(); if (body) onSave(body); closeComposer(); };
+    composer.querySelector('.save').onclick = keep;
+    composer.querySelector('textarea').onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); keep(); } };
     return composer;
   }
   function openLineComposer(f, row, redraw = render) {
@@ -1058,26 +1910,25 @@
     const range = sel.getRangeAt(0);
     const node = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
     const region = node.closest('.commentable');
-    if (!region || node.closest('.sbs .was')) { selbtn.hidden = true; return; }     // comments go on what it says now
+    if (!region) { selbtn.hidden = true; return; }
     const r = range.getBoundingClientRect();
     Object.assign(selbtn.style, { left: `${r.left + scrollX}px`, top: `${r.top + scrollY - 34}px` });
     selbtn.hidden = false;
     selbtn.onclick = () => {
-      const f = data.features.find(x => x.id === current);
-      const c = makeComposer(quote, (body) => { entry(f.id).comments.push({ id: uid(), kind: 'text', section: region.dataset.section, quote, body, at: Date.now() }); save(); render(); }, 'float');
+      const unit = region.closest('[data-feature]')?.dataset.feature || shownId;
+      const c = makeComposer(quote, (body) => { entry(unit).comments.push({ id: uid(), kind: 'text', section: region.dataset.section, quote, body, at: Date.now() }); save(); render(); }, 'float');
       Object.assign(c.style, { left: `${r.left + scrollX}px`, top: `${r.bottom + scrollY + 6}px` });
       document.body.appendChild(c); c.querySelector('textarea').focus();
     };
   }, 0));
 
   // Wrap the first occurrence of each quoted comment in a <mark>, when the quote sits inside one text node.
-  function highlight(f) {
+  function highlight(f, root = main) {
     for (const c of entry(f.id).comments.filter(c => c.kind === 'text')) {
-      const region = main.querySelector(`.commentable[data-section="${c.section}"]`);
+      const region = root.querySelector(`.commentable[data-section="${c.section}"]`);
       if (!region) continue;
       const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        if (n.parentElement.closest('.sbs .was')) continue;
         const i = n.data.indexOf(c.quote);
         if (i < 0) continue;
         const mark = document.createElement('mark'); mark.className = 'hl'; mark.title = c.body;
@@ -1091,17 +1942,40 @@
   // ---- output
   function summary() {
     const lines = [PLAN ? `## Plan review of ${data.pr.repo} — ${data.pr.title}` : `## Review of ${data.pr.repo}#${data.pr.number} at \`${data.pr.head}\``, ''];
-    data.features.forEach((f, i) => {
-      const s = state[f.id] || {};
-      const mark = s.decision === 'approved' ? '✅ Approved' : s.decision === 'changes' ? '❌ Changes requested' : '⬜ Not reviewed';
-      lines.push(`${i + 1}. **${f.title}** — ${mark}`);
-      if (s.note) lines.push(`   > ${s.note.replace(/\n/g, '\n   > ')}`);
+    const short = (q) => q.length > 80 ? q.slice(0, 77) + '…' : q;
+    const remarks = (s, name) => {
       for (const c of s.comments || []) {
         lines.push(c.kind === 'line' ? `   - \`${c.file}:${c.line}\` — ${c.body}`
           : c.kind === 'file' ? `   - \`${c.file}\` — ${c.body}`
-          : `   - "${c.quote.length > 80 ? c.quote.slice(0, 77) + '…' : c.quote}" — ${c.body}`);
+          : c.kind === 'item' || name ? `   - ${name ? name(c.section) : c.section} "${short(c.quote)}" — ${c.body}`
+          : `   - "${short(c.quote)}" — ${c.body}`);
       }
-    });
+    };
+    const unit = (label, s) => {
+      const mark = s.decision === 'approved' ? '✅ Approved' : s.decision === 'changes' ? '❌ Changes requested' : '⬜ Not reviewed';
+      lines.push(`${label} — ${mark}`);
+      if (s.note) lines.push(`   > ${s.note.replace(/\n/g, '\n   > ')}`);
+      remarks(s);
+    };
+    if (LAYERED) {
+      for (const l of LEVELS) {
+        const s = state[l.id] || {}, t = tallyOf(l.id);
+        const mark = s.decision === 'approved' ? '✅ Approved'
+          : s.decision === 'changes' ? `❌ Changes requested${t.open ? `, ${plural(t.open, 'clause')} not read` : ''}`
+          : t.ok ? `⬜ Not finished, ${t.ok} of ${t.n} clauses signed` : '⬜ Not reviewed';
+        lines.push(`- **${l.name} · ${l.title}** — ${mark}`);
+        for (const id of order[l.id]) {
+          const r = rowOf(id), c = clauses.get(id), text = clauseText(c);
+          if (r?.d === 'change') lines.push(`   - ${clauseName(c)}${text ? ` "${short(text)}"` : ''} — ${r.note.replace(/\n/g, ' ')}`);
+        }
+        remarks(s, (section) => clauses.has(section) ? clauseName(clauses.get(section)) : section);
+      }
+      const touched = data.features.map((f, i) => [f, i]).filter(([f]) => state[f.id]?.decision || state[f.id]?.note || state[f.id]?.comments?.length);
+      if (touched.length) lines.push('', `${codeName}:`);
+      for (const [f, i] of touched) unit(`${i + 1}. **${f.title}**`, state[f.id]);
+      return lines.join('\n');
+    }
+    data.features.forEach((f, i) => unit(`${i + 1}. **${f.title}**`, state[f.id] || {}));
     return lines.join('\n');
   }
   document.getElementById('copy').onclick = async (e) => { await navigator.clipboard.writeText(summary()); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy review summary', 1500); };
@@ -1122,20 +1996,33 @@
     }
     submitted = true; btn.hidden = true; document.getElementById('submitted').hidden = false; render();
   };
-  addEventListener('hashchange', () => { current = location.hash.slice(1) || current; render(); });
+  addEventListener('hashchange', () => {
+    const next = location.hash.slice(1) || current;
+    if (next === current && next === shownId) return;
+    current = next; render();
+  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { if (composer) return closeComposer(); closeZoom(); return closeFocus(); }
-    if (!focusOpen() || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.key === 'Escape') {
+      if (composer) return closeComposer();
+      if (composing && onLevel()) return cancelAsk();
+      if (noting && zoom.hidden && !focusOpen()) { noting = null; return render(); }
+      closeZoom(); return closeFocus();
+    }
+    if (onLevel() && levelKey(e)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
     const key = e.key;
+    if (key === 'f' || key === 'F') { e.preventDefault(); return toggleFace(); }
+    if (!focusOpen()) return;
     if (key === 'ArrowRight' || key === 'PageDown' || key === 'j') { e.preventDefault(); goFocus(1); }
     else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'k') { e.preventDefault(); goFocus(-1); }
     else if (key === 'Enter') { e.preventDefault(); markGood(); }
     else if (key === 'c' || key === 'C') { e.preventDefault(); fileComposer(); }
     else if (key === 'r' || key === 'R') {
-      const file = reading(data.features.find(x => x.id === current)).flat[focusAt];
+      const file = reading(focusFeature).flat[focusAt];
       if (file && canRender(file)) { e.preventDefault(); setMdView(mdView === 'rendered' ? 'source' : 'rendered'); }
     }
   });
+  if (LAYERED) syncLevels();
   render();
+  drawAhead();
 })();
