@@ -92,23 +92,34 @@ and the page degrades to file links.
 
 ### In the page
 
-- **Sidebar** lists the features. The badge is the decision; a `✎` count is
-  how many comments you left; `2/5 👁` is how many of its files you marked
-  viewed.
-- **Each feature** shows the user scenario, what changed, the entities it
-  adds or changes (what each consists of, what you can do with it, why, and a
-  serialized examples beside them, in an editor with a tab per case), architecture diagrams (hover one for a
-  full-screen button; Esc closes), before/after screenshots, the
-  syntax-highlighted diff, and how it was tested.
-- **Viewed** — a checkbox on each file in the diff, as on GitHub. Checking
-  it folds the file; the Diff heading counts them.
+- **Sidebar** names the PR and lists the features. The box beside one is
+  your decision: a tick for approved, a cross for changes requested, an
+  exclamation mark when the author reworked it after you decided. The line
+  under the title counts the files you marked viewed (`2 of 9 viewed`) and
+  the comments you left. The list scrolls on its own, so **Submit review**
+  stays in view at the foot. `pr.exposure`, who the change reaches, sits
+  under the PR title, cut to three lines until you open it; a review with
+  levels shows it on the High page instead, and lists High, Mid, Low and
+  Code in place of the features.
+- **Each feature** is set as one document. The author's words run down a
+  text column in the statement typeface, and zreview's own notes sit in the
+  margin beside them. It shows the user scenario, what changed, the entities
+  it adds or changes (what each consists of, what you can do with it, why,
+  and serialized examples in the margin, in an editor with a tab per case),
+  architecture diagrams drawn in the page's own colours, before/after
+  screenshots (click a diagram or a screenshot for full screen; Esc closes),
+  the syntax-highlighted diff, and how it was tested.
+- **Viewed** — the box in the left margin beside each file, the same box
+  that signs a clause. Ticking it folds the file. The line under the Diff
+  heading counts them, and a bar at the foot of the page opens the next file
+  you have not viewed.
 - **A file several features change** shows each feature only its own lines.
   The header counts them against the whole file (`+11 −0 of +193 −4`) and
   links the other features that change it (`also in 2 3`). Hunks that belong
   to other features fold behind a bar that names them, and a click unfolds
   them. Inside a shared hunk, another feature's lines stay in place as
   context, dimmed, tagged with that feature's number. The feature's own lines
-  carry a blue stripe; lines it shares with another feature are lighter, say
+  carry a solid stripe in the text colour; lines it shares with another feature are lighter, say
   `also 3`, and fold when they sit away from its own lines, like test setup
   several features claim. A feature's `phrases` are highlighted inside a
   shared paragraph, and the other features' edits there are dimmed. Rendered
@@ -117,9 +128,10 @@ and the page degrades to file links.
   way Focus review reads them, with Markdown under Docs.
   Viewed, *updated* and the new-line gutter follow the feature's own lines,
   so a rework of one feature's part of a file leaves the other features
-  alone. **GitHub ↗** opens the file at the feature's first line.
-- **Focus review** — the button in the Diff heading opens one file at a time,
-  full screen, starting at the first you have not viewed. The rail on the
+  alone. **on GitHub** opens the file at the feature's first line.
+- **Focus review** — the link under the Diff heading, or the bar at the foot
+  of the page, opens one file at a time, full screen, starting at the first
+  you have not viewed. The rail on the
   left groups the feature's files in the order worth reading them: the domain
   types the feature declares, then what stores them, the logic, the
   interfaces it is reached through, the surface, then the tests, the docs,
@@ -141,9 +153,15 @@ and the page degrades to file links.
 - **Comment on a diff line** — click it. **Comment on text** — select any
   passage in the scenario, description, or tested block and a Comment button
   appears; the quote stays highlighted with your comment as its tooltip.
-- **Approve** or **Request changes** per feature, with a note.
-- **Theme** — the ☾/☀ button in the sidebar switches light and dark; the
-  page starts on your OS setting and remembers the switch.
+  `⌘↵` (`Ctrl ↵`) saves a comment, `Esc` drops it.
+- **Your decision** closes each feature as one more clause: *This feature is
+  ready to merge.* The box beside it approves, **Request changes** takes a
+  note, **Add a note** attaches one to an approval, and **Undo** takes the
+  decision back.
+- **Theme and typeface** — the moon or sun button at the foot of the sidebar
+  switches light and dark; the page starts on your OS setting and remembers
+  the switch. `Aa` beside it, or `F`, switches the statements between Charter
+  and the system sans.
 - **Submit review** returns the decision to the process, and is the only
   thing that ends it. Reloading or closing the tab does not: every change is
   already on disk, so re-run and carry on where you were. **Copy review
@@ -157,14 +175,70 @@ the author pushes resumes where you were.
 Deciding on a feature saves a revision: the prose, the entities, the diagrams
 and every file's lines as you had them. Marking a file viewed saves that
 file's. On the next run the page shows what the author moved since, not just
-that something moved — a bar naming the parts that were reworked, an
-*updated* chip on each changed section, the old wording struck through beside
-the new in the scenario, description and tested blocks, and in the diff a
-yellow gutter on the lines that are new to you while the lines you already
-read stay plain. Focus review marks the same files in its rail and counts the
+that something moved — a note naming the parts that were reworked, a bar in
+the left margin beside each reworded passage of the scenario, description
+and tested blocks with what it said before in the right margin, and in the
+diff a yellow gutter on the lines that are new to you while the lines you
+already read stay plain. Focus review marks the same files in its rail and counts the
 new lines per file. **Mark as seen** takes the page as your new starting
-point; the reworked files' Viewed checks clear on their own. `--fresh` ignores the file and starts over. A
+point; the reworked files' viewed marks clear on their own. `--fresh` ignores the file and starts over. A
 static `build` keeps the state in the browser instead.
+
+### Reading by levels
+
+A big PR is easier to judge compressed than through its diff. When
+`review.json` has a `purpose`, the page puts three short documents above the
+code, and you read them top down:
+
+| Level | It answers | It holds |
+|---|---|---|
+| **High** | Why does this exist? | a summary, the domain, who the change reaches, the goals and what is out of scope |
+| **Mid** | What does the product do? | per feature: the scenario and its rules, in product words, and its before/after screenshots |
+| **Low** | How does it behave? | per feature: behaviours and their proof, a capture of a case that is hard to picture, diagrams, new libraries |
+
+Each level is one typeset document that you sign clause by clause:
+
+- **Signing.** The box beside a clause signs it. `↵` signs the marked clause
+  and goes to the next unsigned one; pressed on a clause that is off screen it
+  only shows it. **Request a change** (`X`) takes a note instead, and `U`
+  undoes either. `J` and `K` move, `N` finds the next unsigned clause. There
+  is no approve-all.
+- **The margin** is where zreview speaks. A note with a bar beside it needs
+  your judgment: the author's own call, something inferred from the change, a
+  behaviour nobody tested, a statement nothing above asks for. The clause you
+  are on also shows where it was stated and what it connects to. Hover a
+  reference to read it, click it to go there.
+- **Behaviours** at Low show a title and how they are known. The one you are
+  on opens its Given, When, Then lines and its proof, and only then can it be
+  signed. Where the proof is a test, its file name is a link to that test's
+  line in the diff. A behaviour that has a capture shows it under its line.
+  Each feature's diagrams follow its behaviours.
+- **Nothing missing.** Each level ends with a clause that says so. Sign it,
+  or request a change that names what is missing. It covers what the level
+  says outside its clauses, so a rework of that text takes the signature
+  back: at High the summary, the domain, who the change reaches and the
+  sources.
+- **The decision.** A level is approved when every clause is signed, and sent
+  back as soon as one carries a request. After a rework, a clause whose
+  wording or proof moved loses its signature and shows what it said before;
+  the others stay signed.
+- **Typeface.** Statements are set in Charter, so the author's claims read
+  apart from zreview's own notes. `Aa` in the sidebar, or `F`, switches them
+  to the system sans and remembers it. Where Charter is not installed the
+  page falls back to Iowan Old Style, Palatino Linotype or Georgia.
+
+With levels the sidebar has four entries and nothing else: High, Mid, Low
+and **Code**. Code is the lowest one, and it is one document too: a section
+per feature with what changed, the entities, the files with their diffs, how
+it was tested, and a line to sign at its end. You read it with the same keys.
+`↵` ticks the file you are on and goes to the next unread one, and on the
+line at a feature's end it signs that feature's code. `C` comments on the
+file, `X` requests a change on the feature, `U` undoes, `J` and `K` move, `N`
+finds the next unread file. Each feature says how many rules and behaviours
+its code is behind and links back to them, and a link to a feature from a
+level opens the document at that feature. Reading the code is optional: the
+review is decided on the levels, but a change requested on a feature's code
+still sends it back.
 
 ## The contract
 
@@ -200,6 +274,16 @@ the quoted passage and its section; `file` comments carry just the path:
   "summary": "## Review of owner/name#45 at `18b8bf5`\n\n1. …",
   "url": "http://127.0.0.1:65392/" }
 ```
+
+A layered review is decided by level: `features` is keyed `@high`, `@mid`
+and `@low`, next to any feature whose code got a decision of its own. Each
+level carries `rows`, one per clause the reviewer decided: `"d"` is `ok` or
+`change`, a change carries its `note`, and `seen` is the wording they read. A
+clause reworded since has `was` in place of `d`, because that signature no
+longer counts. A row is keyed by the clause's id; a scenario by its feature's
+id, a library by `lib:<name>`, and the closing clause by the level and a
+star, `@mid*`. The summary lists every request under its level. After a
+timeout the record keeps the levels that were only partly read.
 
 Exit code is `0` unless you ask for it to mean something:
 
@@ -319,6 +403,65 @@ The `2` fires before any server starts, so a bad invocation never opens a tab.
   and lockfiles), and `other` for a file it does not recognize. Markdown is
   always docs, and a file an entity names is always a domain type. When it
   guesses wrong, `"role": "docs"` on the file's object sets the group.
+
+### Levels in review.json
+
+`purpose` turns the levels on:
+
+```json
+{
+  "purpose": {
+    "summary": "Why this PR exists, in a sentence or two.",
+    "domain": "The part of the product it touches, for a reader new to it.",
+    "goals": [ { "id": "G1", "text": "A customer can undo a payment.", "source": "stated", "from": "ticket PAY-12" } ],
+    "nonGoals": [ { "id": "N1", "text": "Partial refunds.", "source": "decided", "from": "decision 2" } ],
+    "sources": [ { "label": "Ticket PAY-12", "url": "https://…", "read": true } ]
+  },
+  "libraries": [ { "name": "stripe", "version": "17.0.0", "change": "added", "why": "The refund call.", "where": "app/package.json" } ],
+  "features": [
+    { "id": "refund", "serves": ["G1"],
+      "rules": [ { "id": "R1", "text": "A paid order can be refunded once.", "source": "stated", "from": "ticket PAY-12" } ],
+      "behaviours": [
+        { "id": "B1", "title": "A second refund of the same order is refused", "kind": "error",
+          "when": ["the customer asks again"], "then": ["the answer is 409", "no money moves"],
+          "checks": ["R1"],
+          "evidence": { "by": "test", "file": "src/pay.spec.ts", "name": "refuses a second refund" } } ] }
+  ]
+}
+```
+
+- A PR too small to have goals says `"purpose": { "absent": "why" }` and is
+  read on Mid and Low only.
+- Every goal, non-goal and rule says where it comes from. `"source"` is
+  `stated` (with `from` naming where), `decided` (the author's call, because
+  nothing above settles it) or `inferred` (read off the change, written down
+  nowhere). The page asks the reviewer to judge the last two. `flag` is the
+  one thing to weigh before signing a statement.
+- Nothing floats. `serves` on a feature or a rule lists goal ids, `checks` on
+  a behaviour lists rule ids, and one that has neither carries `derived`: why
+  it is here though nothing above asks for it.
+- `evidence.by` is how a behaviour is known: `test` with the `file` and the
+  test's `name` as the diff spells it (`"existing": true` when the test was
+  already there), `stand` or `reading` with a `note` of what was seen and
+  where, or `none`.
+- A behaviour is a `title` that states the outcome, and `kind` (`main`,
+  `edge` or `error`). `given`, `when` and `then` are optional lists of steps:
+  write a line only where it says more than the title. zreview refuses a
+  `given` that sets nothing up ("a customer") and steps that only repeat the
+  title.
+- A behaviour can carry `screenshots` of its own, `{ "before", "after",
+  "caption" }` with either image or both, for a case that is hard to picture
+  from words: an error, an empty state, a layout at its limit. The caption
+  says what the capture shows of that case. The feature's own `screenshots`
+  stay the before and after of its main path, and are read at Mid.
+- `libraries` lists what the PR adds, upgrades or removes, `[]` when none.
+  When a package manifest changed and nothing is listed, `librariesNote` says
+  why.
+- Each level has a size it may not outgrow: 5 goals and 5 non-goals of 30
+  words, 7 rules of 35 words per feature, 10 behaviours per feature with a
+  14-word title and at most 7 steps of 25 words.
+
+A problem in the levels is exit `2` naming each one, before any tab opens.
 
 ## Screenshots
 

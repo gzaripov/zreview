@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { diagramError, mermaidVersion } from "./diagrams.ts";
 import { GROUP_KEYS, GROUPS, groupOf, isGroup } from "./groups.ts";
+import { alignment, diffProblems, findings, levelProblems, type Alignment, type Behaviour, type Library, type Purpose, type Rule } from "./levels.ts";
 
 export type Shots = { before?: string; after?: string; caption?: string; before_src?: string; after_src?: string };
 export type DiffLine = { t: " " | "+" | "-"; old?: number; new?: number; text: string };
@@ -27,7 +28,7 @@ export type FileRef = {
 export type Part = { name: string; type?: string; meaning: string; why?: string; change?: "added" | "changed" | "removed" };
 export type Entity = {
   name: string; kind?: string; change: "added" | "changed" | "renamed" | "removed";
-  from?: string; summary: string; why?: string; file?: string;
+  from?: string; summary: string; why?: string; file?: string; label?: string;
   fields?: Part[]; operations?: Part[];
   /** A serialized instance. An object is pretty-printed as JSON; a string is shown verbatim. Kept for old review.json files; prefer `examples`. */
   example?: unknown;
@@ -38,10 +39,13 @@ export type Entity = {
 export type Feature = {
   id: string; title: string; scenario: string; description: string;
   entities?: Entity[];
-  diagrams?: { title?: string; mermaid: string }[];
+  diagrams?: { title?: string; mermaid: string; from?: string }[];
   screenshots?: Shots | null;
   files?: (string | FileRef)[];
   tested?: string;
+  serves?: string[]; derived?: string;
+  rules?: Rule[];
+  behaviours?: Behaviour[];
 };
 export type Review = {
   /** Names this review's state across runs. Set it on the plan and keep it, and the decisions made on the
@@ -54,6 +58,9 @@ export type Review = {
   pr: { repo: string; number?: number; url?: string; title: string; base?: string; head?: string; exposure?: string };
   features: Feature[];
   groups?: typeof GROUPS;
+  purpose?: Purpose;
+  libraries?: Library[]; librariesNote?: string;
+  alignment?: Alignment;
 };
 export type BuildOptions = {
   maxWidth: number; quality: number; served: boolean; diffText?: string; plan?: boolean; build?: string;
@@ -371,6 +378,8 @@ export async function loadReview(path: string, forcePlan = false): Promise<Revie
     }
   }
   if (problems.length) throw new ReviewError(`${path}: ${problems.length} problem${problems.length === 1 ? "" : "s"} in the features:\n  ${problems.join("\n  ")}`);
+  const levels = levelProblems(review);
+  if (levels.length) throw new ReviewError(`${path}: ${levels.length} problem${levels.length === 1 ? "" : "s"} in the levels:\n  ${levels.join("\n  ")}`);
   return review;
 }
 export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise<{ html: string; review: Review; log: string[] }> {
@@ -388,9 +397,10 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
       const d = diffs?.get(ref.path);
       if (d) Object.assign(ref, { hunks: d.hunks, add: d.add, del: d.del, status: d.status });
     }
-    const shots = f.screenshots;
-    if (shots?.before) shots.before_src = await dataUri(shots.before, base, opts, log);
-    if (shots?.after) shots.after_src = await dataUri(shots.after, base, opts, log);
+    for (const shots of [f.screenshots, ...(f.behaviours ?? []).map((b) => b.screenshots)]) {
+      if (shots?.before) shots.before_src = await dataUri(shots.before, base, opts, log);
+      if (shots?.after) shots.after_src = await dataUri(shots.after, base, opts, log);
+    }
   }
   if (diffs) {
     const unclaimed = [...diffs.keys()].filter((p) => !claimed.has(p)).sort();
@@ -408,8 +418,17 @@ export async function buildHtml(reviewPath: string, opts: BuildOptions): Promise
         (listing ? `\n\nThe changed lines of ${ownership.rejected.size === 1 ? "that file" : "those files"}, numbered the way "lines" takes them, ` +
           `with the feature each goes to now:\n\n${listing}` : ""));
     }
+    const evidence = diffProblems(review, diffs);
+    if (evidence.length) {
+      throw new ReviewError(`${reviewPath}: ${evidence.length} problem${evidence.length === 1 ? "" : "s"} with what the levels say of the PR:\n  ${evidence.join("\n  ")}`);
+    }
   } else if (review.features.some((f) => (f.files as FileRef[]).some((ref) => ref.lines))) {
     log.push(`no diff, so the files' "lines" are not checked and every file shows as a link`);
+  }
+  if ("purpose" in review) {
+    review.alignment = alignment(review, diffs);
+    log.push(...findings(review, review.alignment));
+    if (!diffs) log.push(`no diff, so the tests the behaviours name are not checked against it`);
   }
   const texts = new Map<string, Promise<FileRef["text"]>>();
   // A docs PR can change hundreds of Markdown files: fetch six at a time, not one gh process for each at once.

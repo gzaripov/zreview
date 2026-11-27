@@ -22,31 +22,38 @@ __STYLE__
 <script id="review-data" type="application/json">__REVIEW_JSON__</script>
 <div class="layout">
   <aside>
-    <button id="theme" class="theme" type="button" title="Switch theme"></button>
-    <h1 id="pr-title"></h1>
-    <div class="meta" id="pr-meta"></div>
-    <div class="exposure" id="pr-exposure"></div>
-    <nav id="nav"></nav>
+    <div class="side">
+      <header class="side-head">
+        <p class="where" id="pr-meta"></p>
+        <h1 id="pr-title"></h1>
+        <p class="exposure" id="pr-exposure"></p>
+        <button class="more" id="pr-more" type="button" hidden>Show all</button>
+      </header>
+      <nav id="nav"></nav>
+    </div>
     <div class="tally">
       <div id="tally"></div>
-      <button id="submit" class="primary" hidden>Submit review</button>
+      <button id="submit" class="primary" type="button" hidden>Submit review</button>
       <div id="submitted" class="done" hidden>Submitted. You can close this tab.</div>
-      <button id="copy">Copy review summary</button>
-      <button id="export">Export decisions.json</button>
-      <div class="build" title="The zreview build that made this page">zreview __BUILD__</div>
+      <div class="links"><button id="copy" type="button">Copy review summary</button><button id="export" type="button">Export decisions.json</button></div>
+      <div class="colophon">
+        <span class="toggles"><button id="face" class="theme face" type="button" aria-label="Switch the typeface of the statements">Aa</button><button id="theme" class="theme" type="button" title="Switch theme"></button></span>
+        <span class="build" title="The zreview build that made this page">zreview __BUILD__</span>
+      </div>
     </div>
   </aside>
   <main id="main"></main>
 </div>
 <button id="selbtn" class="selbtn" hidden>Comment</button>
+<div id="pop" class="pop" hidden></div>
 <div id="focus" class="focus" hidden role="dialog" aria-label="Focus review">
   <div class="rail">
     <div class="rhead"><span class="rtitle"></span><span class="rcount"></span></div>
     <div class="rlist"></div>
     <div class="rkeys">
+      <div><kbd>↵</kbd> viewed, next file</div>
       <div><kbd>→</kbd> <kbd>PgDn</kbd> next file</div>
       <div><kbd>←</kbd> <kbd>PgUp</kbd> previous</div>
-      <div><kbd>Enter</kbd> looks good, next</div>
       <div><kbd>C</kbd> comment on this file</div>
       <div><kbd>R</kbd> Markdown rendered or source</div>
       <div><kbd>Esc</kbd> back to the feature</div>
@@ -60,10 +67,10 @@ __STYLE__
       <span class="newly" hidden></span>
       <span class="mdbox"></span>
       <span class="grow"></span>
-      <button class="prev" type="button" title="Previous file (←)">← Previous</button>
-      <button class="next" type="button" title="Next file (→)">Forward →</button>
-      <button class="good" type="button" title="Mark viewed and go on (Enter)">Looks good ✓</button>
-      <button class="say" type="button" title="Comment on this file (C)">Comment</button>
+      <button class="prev" type="button" title="Previous file (←)">Previous</button>
+      <button class="next" type="button" title="Next file (→)">Next</button>
+      <button class="say" type="button" title="Comment on this file (C)">Comment <kbd>C</kbd></button>
+      <button class="good" type="button" title="Mark viewed and go on (Enter)"></button>
       <button class="close" type="button" title="Close (Esc)" aria-label="Close">✕</button>
     </div>
     <div class="code"></div>

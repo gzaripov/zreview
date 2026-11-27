@@ -92,6 +92,10 @@ before any tab opens. Fix the diagram it names. Do not drop the diagram to
 get past the check. In a flowchart, quote a label that contains `(`, `;`, `=` or `:`, as in
 `A["fetch(id)"]`. A state transition label takes one colon: `a --> b: publish`,
 not `a --> b: resolved: publish`.
+The page draws each diagram in its own colours, light and dark, so leave out
+`%%{init}%%` themes, `classDef` fills and `style` lines. A diagram wider than
+the page is scaled down to fit, text included: keep a flowchart to about four
+boxes across, or draw it top to bottom.
 
 **`screenshots`** — when a user could see the change. A modification gets
 **before and after**. Render the before from the code you replaced, under the
@@ -99,6 +103,7 @@ same viewport and seeded state as the after; a wider or shorter harness renders
 a different bug. Look at it and confirm the symptom shows. Delete any capture
 harness before committing. `null` when there is no user-visible surface; the
 page prints the absence. The builder inlines the images, so nothing is uploaded.
+With levels, the reviewer sees a feature's pair at Mid.
 
 **`files`** — exactly as `gh pr diff --name-only` spells them, and every one
 of them. Focus review walks them grouped by path (domain types first, then
@@ -133,7 +138,7 @@ line goes with the lines added in its place when those all belong to the same
 features. Claim it with `old:N` when they do not, or when it belongs elsewhere
 — a function one feature deletes right where another adds code; an explicit
 claim replaces the default. The page shows each feature its lines in full with
-a blue stripe, folds the hunks that belong to other features behind a bar
+a solid stripe, folds the hunks that belong to other features behind a bar
 naming them, and dims other features' lines inside a shared hunk.
 
 You do not need the numbers up front. zreview exits `2` before any tab opens
@@ -148,7 +153,87 @@ each feature's shared files show its own changes and nothing else.
 covered. If nothing ran, say so and name what a reviewer should run. Never
 hoist every result under one feature; the reviewer approves features.
 
-## 3. Review the plan first, when there is one to review
+## 3. Write the levels, for a PR read top-down
+
+A big PR is easier to judge compressed than through its diff. When the
+reviewer asks to read top-down, or the PR is too big to hold in one head, add
+`purpose` to `review.json`. The page then puts three short documents above
+the code, and the reviewer signs them clause by clause, in this order:
+
+- **High, why this exists.** `purpose.summary` and `purpose.domain`, a
+  sentence or two each, then `goals` and `nonGoals`. The page prints
+  `pr.exposure` after the domain as who the change reaches, so write only
+  that there and do not repeat the summary. A PR too small to have
+  goals, a bug fix, says `"purpose": { "absent": "why" }` and is read on two
+  levels.
+- **Mid, what the product does**, as a product manager would say it. Each
+  feature keeps its `scenario` and gains `rules`: how the product behaves, in
+  product words, with no mechanism. `serves` lists the goals a feature or a
+  rule serves.
+- **Low, how it behaves**, as a tester would check it. Each feature gains
+  `behaviours`, each with the rules it `checks` and its `evidence`. The
+  diagrams are read here, and so is `libraries`: everything the PR adds,
+  upgrades or removes, `[]` when none.
+- **Code**, below the levels: every feature's description, entities, files
+  and test notes as one document. The reviewer opens it when a clause sends
+  them there, so the levels have to stand without it.
+
+**Say where each statement comes from.** `"source": "stated"` with `from`
+naming the ticket, the PR description or the doc. `"decided"` for a call the
+author made because nothing above settles it. `"inferred"` when it is read
+off the change and written down nowhere. The page hands the last two to the
+reviewer as theirs to judge, so never mark a guess as stated. List in
+`purpose.sources` what you read and what you could not.
+
+**Nothing floats.** A feature or a rule that serves no goal, and a behaviour
+that checks no rule, carries `derived`: why it is here though nothing above
+asks for it. The reviewer keeps it, drops it, or adds what is missing above.
+
+**Evidence is how the behaviour is known, not how it could be.** `test` with
+the `file` and the test's `name` as the diff spells it, and `"existing":
+true` for a test that was already there. `stand` or `reading` with a `note`
+of what was seen and where. `none` when nothing covers it. Put in `flag` the
+one thing the reviewer should weigh before signing a statement, and leave it
+out when there is none: a mark on every line marks nothing.
+
+**Capture the cases words do not show.** A behaviour takes `screenshots`
+too: `{ "before", "after", "caption" }` with either image or both. Use it for
+a complicated case a reviewer cannot picture from its title, such as an error
+message, an empty state or a layout at its limit, and say in the caption what
+the capture shows of that case. Capture it the way you capture a feature's
+pair, from the real page under a seeded state. Leave it off the main path:
+the feature's own pair already shows that at Mid.
+
+**Write a behaviour as a title, and add steps only where they say more.** The
+reviewer scans the titles and opens one behaviour at a time, so the title is
+a sentence that states the outcome: "A second refund of the same order is
+refused". `given`, `when` and `then` are optional lists, and every line has
+to earn its place:
+
+- No filler `given`. "Given a customer" sets nothing up. Say the state that
+  matters ("a customer whose order was refunded yesterday"), or leave the
+  line out.
+- No step that repeats the title. When the title already says who does what
+  and what follows, the behaviour has no steps.
+- Keep steps for what a tester would not guess: the exact input, the status
+  code, the message, the second thing that must also hold.
+- Only the three words. No outlines, tables or tags: nobody runs these lines.
+
+Each level has a size it may not outgrow, and zreview exits `2` naming every
+problem: 5 goals and 5 non-goals of 30 words, 7 rules of 35 words per
+feature, 10 behaviours per feature with a 14-word title and at most 7 steps.
+Past that, split the feature or keep only the cases a tester would not guess.
+
+What comes back is decided by level, `@high`, `@mid` and `@low`. A level is
+`approved` when every clause is signed, including its last one, which says
+nothing is missing; it is `changes` as soon as one clause carries a request.
+The summary lists each request under its level with the clause's id, and
+`features["@mid"].rows` holds the same per clause. After a rework, rewrite
+the clause and run again: a clause whose wording or proof moved loses its
+signature and is shown with what it said before, and the rest stay signed.
+Keep the ids stable, and do not reword a clause nobody asked you to change.
+
+## 4. Review the plan first, when there is one to review
 
 For work worth agreeing on before writing it, the same page reviews the plan.
 Write `review.json` with `"plan": true`, an `id` you will keep, `pr.repo` and
@@ -163,7 +248,7 @@ keeps their plan decisions and sees what you reworked in the spec since, so
 keep the features and their ids stable — a renamed id reads as a feature they
 never agreed to.
 
-## 4. Review the code
+## 5. Review the code
 
 Work in a scratch directory outside the repository — the page carries base64
 images and does not belong in a working tree.
@@ -185,7 +270,7 @@ reviewer's decisions, comments and viewed files persist per PR across runs,
 so after you address `changes` and push, re-run the same way and they resume
 where they were; pass `--fresh` only if they ask to start over. The page
 holds the revision the reviewer last looked at and marks everything you moved
-since — the reworked prose word by word, the changed entities and diagrams,
+since — each reworded passage beside what it said before, the changed entities and diagrams,
 and the lines that are new to them — so rewrite `review.json` to match the
 fixes rather than leaving it stale. A scenario or description that no longer
 matches the code shows up as a reworked passage they have to read twice.
@@ -205,7 +290,7 @@ Open the page yourself once before handing it over and walk every feature:
 diagrams rendered, screenshots load, file links resolve, entities read as
 prose rather than declarations.
 
-## 5. Act on the decision
+## 6. Act on the decision
 
 `changes` — each sent-back feature's note and comments are the reviewer's ask.
 Address them in the same conversation; do not re-litigate a verdict. A `line`
@@ -241,3 +326,5 @@ else's → `gh pr review <N> --approve|--request-changes --body-file summary.md`
 - Do not ship a "before" you have not looked at.
 - Do not describe files the platform file list does not contain.
 - Do not list a shared file without `lines`; say which lines are whose.
+- Do not pad a behaviour with a `given` that sets nothing up, or with steps
+  that repeat its title.
